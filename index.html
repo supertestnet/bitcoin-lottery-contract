@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <script src="https://bitcoincore.tech/apps/bitcoinjs-ui/lib/bitcoinjs-lib.js"></script>
+    <script src="https://bundle.run/buffer@6.0.3"></script>
+    <script src="https://supertestnet.github.io/bitcoin-chess/js/qrcode.js"></script>
+    <script src="https://bundle.run/varuint-bitcoin@1.1.2"></script>
+    <script>
+        function getNativeSegwitAddressFromPrivkeyHex( privkeyhex ) {
+        return bitcoinjs.payments.p2wpkh({ pubkey: bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.regtest } ).publicKey, network: bitcoinjs.networks.regtest }).address;
+        }
+    </script>
+    <script>
+        function firstPubkeyIsBigger( a, b ) {
+            return ( BigInt( "0x" + b ) - BigInt( "0x" + a ) ) < 0;
+        }
+    </script>
+    <script>
+        function generateCollateralWitnessScript( hash, pubkeys, mynum ) {
+            return bitcoinjs.script.fromASM(
+                makeCollateralScript( hash, pubkeys, mynum )
+                .trim()
+                .replace(/\s+/g, ' '),
+            );
+        }
+
+        function makeCollateralScript( hash, pubkeys, mynum ) {
+
+          var num = pubkeys.length;
+
+          var scr = "";
+
+          var firstpart = `
+          OP_HASH160
+          ${ hash }
+          OP_EQUAL
+          OP_IF
+              ${ pubkeys[ mynum ] }
+              OP_CHECKSIG
+          OP_ELSE
+              OP_8
+              OP_CHECKSEQUENCEVERIFY
+              OP_DROP
+              ${ "OP_" + ( num ).toString() }
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var secondpart = `
+              ${ "OP_" + ( num ).toString() }
+              OP_CHECKMULTISIG
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          scr += firstpart;
+
+          var i; for ( i=0; i<num; i++ ) {
+            scr += `${ pubkeys[ i ] }\n`;
+          }
+
+          scr += secondpart;
+
+          return ( scr );
+
+        }
+
+        function collateral( hash, pubkeys, mynum ) {
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, pubkeys, mynum ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            return p2wsh.address;
+        }
+
+    </script>
+    <script>
+        function withdrawFromCollateralAddressAsMultisigPartners( psbthex, collateralPrivkey ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( collateralPrivkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function withdrawFromCollateralAddressAsLastSigner( psbthex, original_order_of_pubkeys ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            var getFinalScripts = ( txindex, input, script) => {
+                //Step 1: Check to make sure the meaningful locking script matches what you expect.
+                var decompiled = bitcoinjs.script.decompile( script )
+                if ( !decompiled ) {
+                throw new Error( `Can not finalize input #${txindex}` )
+                }
+                //Step 2: Create final scripts
+                var stack_elements = [];
+                //add a dummy value because we are using multisig which pops one extra item off the stack – in segwit the dummy value must be zero i.e. null value i.e. empty string
+                stack_elements.push( '' );
+                var sig_order = [];
+                original_order_of_pubkeys.forEach( function( key ) {
+                    var i; for ( i=0; i<input.partialSig.length; i++ ) {
+                        if ( key == buffer.Buffer.from( input.partialSig[ i ].pubkey ).toString( "hex" ) ) {
+                            sig_order.push( i );
+                        }
+                    }
+                });
+                sig_order.forEach( function( item ) {
+                    stack_elements.push( input.partialSig[ item ].signature );
+                });
+                //add a null value i.e. empty string so that it does not hash to the right value and therefore triggers the multisig path
+                stack_elements.push( '' );
+                var witnessStack = bitcoinjs.payments.p2wsh({
+                    redeem: {
+                        output: script,
+                        input: bitcoinjs.script.compile( stack_elements ),
+                    }
+                });
+                return {
+                    finalScriptWitness: witnessStackToScriptWitness( witnessStack.witness )
+                }
+            }
+            psbt.finalizeInput( 0, getFinalScripts );
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        function generateLotteryWitnessScript( array_of_hashes_and_pubkeys ) {
+            return bitcoinjs.script.fromASM(
+                makeScript( array_of_hashes_and_pubkeys )
+                .trim()
+                .replace(/\s+/g, ' '),
+            );
+        }
+
+        function makeScript( array_of_hashes_and_pubkeys ) {
+
+          var num = array_of_hashes_and_pubkeys.length;
+
+          var scr = "";
+
+          var firstpart = `
+          OP_TOALTSTACK
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var secondpart = `
+          OP_DUP
+          OP_HASH160
+          ${ array_of_hashes_and_pubkeys[ 0 ][ 0 ] }
+          OP_EQUAL
+          OP_NOTIF
+              ${ bitcoinjs.script.number.encode( 31 ).toString( 'hex' ) }
+             OP_SWAP
+             OP_DROP
+          OP_ELSE
+          OP_SIZE
+          OP_DUP
+          OP_16
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var secondandahalfpart = `
+          OP_WITHIN
+          OP_NOTIF
+             OP_RETURN
+          OP_ENDIF
+          OP_16
+          OP_SUB
+          OP_SWAP
+          OP_DROP
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var thirdpart = `
+          OP_FROMALTSTACK
+          OP_DUP
+          OP_HASH160
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var fourthpart = `
+          OP_EQUAL
+          OP_NOTIF
+             ${ bitcoinjs.script.number.encode( 31 ).toString( 'hex' ) }
+             OP_SWAP
+             OP_DROP
+          OP_ELSE
+          OP_SIZE
+          OP_DUP
+          OP_16
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var fifthpart = `
+          OP_WITHIN
+          OP_NOTIF
+             OP_RETURN
+          OP_ENDIF
+          OP_16
+          OP_SUB
+          OP_SWAP
+          OP_DROP
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var sixthpart = `
+          OP_ADD
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var seventhpart = `
+          OP_DUP
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var eighthpart = `
+          OP_GREATERTHANOREQUAL
+          OP_IF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var ninthpart = `
+             OP_SUB
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var tenthpart = `
+          OP_DEPTH
+          OP_0
+          OP_GREATERTHAN
+          OP_IF
+          OP_DUP
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var eleventhpart = `
+          OP_EQUAL
+          OP_IF
+            OP_DROP
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var twelfthpart = `
+            OP_CHECKSIGVERIFY
+          OP_ENDIF
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var lastpart = `
+          OP_DEPTH
+          ${ "OP_" + ( num ).toString() }
+          OP_GREATERTHANOREQUAL
+          OP_IF
+            OP_16
+            OP_CHECKSEQUENCEVERIFY 
+            OP_2DROP
+         ${ "OP_" + ( num ).toString() }
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var lastpartsecondhalf = `
+            ${ "OP_" + ( num ).toString() }
+            OP_CHECKMULTISIG
+          OP_ELSE
+            OP_1
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var i; for ( i=0; i<num-1; i++ ) {
+            scr += firstpart;
+          }
+
+          var number = ( Number( 16 ) + Number( num ) ).toString();
+          scr += secondpart + `${ bitcoinjs.script.number.encode( number ).toString( 'hex' ) }\n` + secondandahalfpart;
+
+          var i; for ( i=1; i<num; i++ ) {
+                    var number = ( Number( 16 ) + Number( num ) ).toString();
+            scr += thirdpart + `${ array_of_hashes_and_pubkeys[ i ][ 0 ] }\n` + fourthpart + `${ bitcoinjs.script.number.encode( number ).toString( 'hex' ) }\n` + fifthpart;
+          }
+
+          var i; for ( i=0; i<num-1; i++ ) {
+            scr += sixthpart;
+          }
+
+          var i; for ( i=0; i<num-1; i++ ) {
+                    var number = num.toString();
+            scr += seventhpart + `${ "OP_" + ( number ).toString() }\n` + eighthpart + `${ "OP_" + ( number ).toString() }\n` + ninthpart;
+          }
+
+          var i; for ( i=0; i<num; i++ ) {
+                    var number = i.toString();
+            scr += tenthpart + `${ "OP_" + ( number ).toString() }\n` + eleventhpart + `${ array_of_hashes_and_pubkeys[ i ][ 1 ] }\n` + twelfthpart;
+          }
+
+          scr += lastpart;
+
+          var i; for ( i=0; i<num; i++ ) {
+            scr += `${ array_of_hashes_and_pubkeys[ i ][ 1 ] }\n`;
+          }
+
+          scr += lastpartsecondhalf;
+
+          return ( scr );
+
+        }
+
+        function receive( array_of_hashes_and_pubkeys ) {
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            return p2wsh.address;
+        }
+    </script>
+    <script>
+        function witnessStackToScriptWitness(witness) {
+          let buffer2 = buffer.Buffer.allocUnsafe(0);
+          function writeSlice(slice) {
+            buffer2 = buffer.Buffer.concat([buffer2, buffer.Buffer.from(slice)]);
+          }
+          function writeVarInt(i) {
+            const currentLen = buffer2.length;
+            const varintLen = varuintBitcoin.encodingLength(i);
+            buffer2 = buffer.Buffer.concat([buffer2, buffer.Buffer.allocUnsafe(varintLen)]);
+            varuintBitcoin.encode(i, buffer2, currentLen);
+          }
+          function writeVarSlice(slice) {
+            writeVarInt(slice.length);
+            writeSlice(slice);
+          }
+          function writeVector(vector) {
+            writeVarInt(vector.length);
+            vector.forEach(writeVarSlice);
+          }
+          writeVector(witness);
+          return buffer2;
+        }
+    </script>
+    <script>
+        function startFundingPSBT( bet_amount, players, privkey, lotteryAddress, mynum ) {
+            var num_of_players = players.length;
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            players.forEach( function( player ) {
+                psbt
+                .addInput({
+                    hash: player[ "utxo" ][ "txid" ],
+                    index: player[ "utxo" ][ "txindex" ],
+                    witnessUtxo: {
+                        script: buffer.Buffer.from( '0014' +
+                            bitcoinjs.crypto.hash160( buffer.Buffer.from( player[ "pubkey" ], 'hex' ) ).toString( 'hex' ),
+                            'hex' ),
+                        value: player[ "utxo" ][ "value" ]
+                    },
+                });
+            });
+            var new_quantity_of_sats_for_collateral_addresses = bet_amount * num_of_players * ( num_of_players - 1 );
+            var new_quantity_of_sats_for_lottery_address = bet_amount * num_of_players;
+            players.forEach( function( player ) {
+                psbt
+                .addOutput({
+                    address: player[ "collateral_address" ],
+                    value: new_quantity_of_sats_for_collateral_addresses,
+                });
+            });
+            psbt
+            .addOutput({
+                address: lotteryAddress,
+                value: new_quantity_of_sats_for_lottery_address,
+            });
+            psbt.signInput( mynum, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function getIdFromPSBT( psbthex ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            return bitcoinjs.Transaction.fromHex( psbt.data.getTransaction().toString( "hex" ) ).getId();
+        }
+    </script>
+    <script>
+        function cosignFundingPSBT( psbthex, privkey, mynum ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            psbt.signInput( mynum, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function finalizeFundingPSBT( psbthex ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            psbt.finalizeAllInputs();
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the collateral withdrawal uses a reasonable fee, not a hard coded 500 sats 
+        function startWithdrawingFromCollateralAddressAsMultisig( txid, txindex, array_of_pubkeys, array_of_addresses, hash, collateralPrivkey, theirkey, bet_amount ) {
+            var num_of_players = array_of_pubkeys.length;
+            var theirnum = 0;
+            array_of_pubkeys.forEach( function( key, index ) {
+                if ( key == theirkey ) {
+                    theirnum = index;
+                }
+            });
+            array_of_addresses.splice( theirnum, 1 );
+            var original_quantity_of_sats = bet_amount * num_of_players * ( num_of_players - 1 );
+            var total_fee = 500;
+            var quantity_of_sats_each_player_gets_out = Math.floor( bet_amount * num_of_players - ( 500 * ( 1 / ( num_of_players - 1 ) ) ) );
+            var witnessscript = generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum );
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var scriptaddress = p2wsh.address;
+            var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
+
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                sequence: 8,
+                witnessScript: p2wsh.redeem.output,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0020' + bitcoinjs.crypto.sha256( buffer.Buffer.from( witnessscript, 'hex' ) ).toString( 'hex' ), 'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            array_of_addresses.forEach( function( address ) {
+                psbt
+                .addOutput({
+                    address: address,
+                    value: quantity_of_sats_each_player_gets_out,
+                });
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( collateralPrivkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the lottery withdrawal uses a reasonable fee, not a hard coded 500 sats 
+        function startWithdrawingFromLotteryAddressAsMultisig( txid, txindex, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, lotteryPrivkey ) {
+            var num_of_players = array_of_hashes_and_pubkeys.length;
+            var original_quantity_of_sats = bet_amount * num_of_players;
+            var total_fee = 500;
+            var quantity_of_sats_each_player_gets_out = Math.floor( original_quantity_of_sats * ( 1 / num_of_players ) ) - Math.ceil( total_fee * ( 1 / num_of_players ) );
+            var witnessscript = generateLotteryWitnessScript( array_of_hashes_and_pubkeys );
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var scriptaddress = p2wsh.address;
+            var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
+
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                sequence: 16,
+                witnessScript: p2wsh.redeem.output,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0020' + bitcoinjs.crypto.sha256( buffer.Buffer.from( witnessscript, 'hex' ) ).toString( 'hex' ), 'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            array_of_addresses.forEach( function( address ) {
+                psbt
+                .addOutput({
+                    address: address,
+                    value: quantity_of_sats_each_player_gets_out,
+                });
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( lotteryPrivkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function withdrawFromLotteryAddressAsMultisigPartners( psbthex, privkey ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function withdrawFromLotteryAddressAsLastSigner( psbthex, original_order_of_pubkeys ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            var getFinalScripts = ( txindex, input, script) => {
+                //Step 1: Check to make sure the meaningful locking script matches what you expect.
+                var decompiled = bitcoinjs.script.decompile( script )
+                if ( !decompiled ) {
+                    throw new Error( `Can not finalize input #${txindex}` )
+                }
+
+                //Step 2: Create final scripts
+                var stack_elements = [];
+                //add a dummy value because we are using multisig which pops one extra item off the stack – in segwit the dummy value must be zero i.e. null value i.e. empty string
+                stack_elements.push( '' );
+                var sig_order = [];
+                original_order_of_pubkeys.forEach( function( key ) {
+                    var i; for ( i=0; i<input.partialSig.length; i++ ) {
+                        if ( key == buffer.Buffer.from( input.partialSig[ i ].pubkey ).toString( "hex" ) ) {
+                            sig_order.push( i );
+                        }
+                    }
+                });
+                sig_order.forEach( function( item ) {
+                    stack_elements.push( input.partialSig[ item ].signature );
+                });
+                original_order_of_pubkeys.forEach( function() {
+                    stack_elements.push( "" );
+                });
+                var witnessStack = bitcoinjs.payments.p2wsh({
+                    redeem: {
+                        output: script,
+                        input: bitcoinjs.script.compile( stack_elements ),
+                    }
+                });
+                return {
+                    finalScriptWitness: witnessStackToScriptWitness( witnessStack.witness )
+                }
+            }
+            psbt.finalizeInput( 0, getFinalScripts );
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the collateral withdrawal uses a reasonable fee, not a hard coded 500 sats 
+        function withdrawFromCollateralAddress( txid, txindex, useraddress, bet_amount, array_of_pubkeys, collateralPrivkey, preimage ) {
+            var num_of_players = array_of_pubkeys.length;
+            var mynum = txindex;
+            var collateralPubkey = getCompressedPubkeyHexFromPrivkeyHex( collateralPrivkey );
+            var hash = bitcoinjs.crypto.hash160( buffer.Buffer.from( preimage, "hex" ) ).toString( "hex" );
+            var original_quantity_of_sats = bet_amount * num_of_players * ( num_of_players - 1 );
+            var new_quantity_of_sats = original_quantity_of_sats - 500;
+            var witnessscript = generateCollateralWitnessScript( hash, array_of_pubkeys, mynum );
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, mynum ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var scriptaddress = p2wsh.address;
+            var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
+
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                witnessScript: p2wsh.redeem.output,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0020' + bitcoinjs.crypto.sha256( buffer.Buffer.from( witnessscript, 'hex' ) ).toString( 'hex' ), 'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            psbt
+            .addOutput({
+                address: useraddress,
+                value: new_quantity_of_sats,
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( collateralPrivkey, "hex" ) ) );
+
+            var getFinalScripts = ( txindex, input, script) => {
+                //Step 1: Check to make sure the meaningful locking script matches what you expect.
+                var decompiled = bitcoinjs.script.decompile( script )
+                if ( !decompiled ) {
+                    throw new Error( `Can not finalize input #${txindex}` )
+                }
+
+                //Step 2: Create final scripts
+                var stack_elements = [];
+                stack_elements.push( input.partialSig[0].signature );
+                stack_elements.push( buffer.Buffer.from( preimage, "hex" ) );
+                var witnessStack = bitcoinjs.payments.p2wsh({
+                    redeem: {
+                        output: script,
+                        input: bitcoinjs.script.compile( stack_elements ),
+                    }
+                });
+                return {
+                    finalScriptWitness: witnessStackToScriptWitness( witnessStack.witness )
+                }
+            }
+            psbt.finalizeInput( 0, getFinalScripts );
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the lottery withdrawal uses a reasonable fee, not a hard coded 500 sats 
+        function withdrawFromLotteryAddress( txid, txindex, bet_amount, useraddress, array_of_hashes_and_pubkeys, lotteryPrivkey, array_of_preimages ) {
+            var num_of_players = array_of_hashes_and_pubkeys.length;
+            var original_quantity_of_sats = bet_amount * num_of_players;
+            var fee_amount = 500;
+            var new_quantity_of_sats = original_quantity_of_sats - fee_amount;
+            var witnessscript = generateLotteryWitnessScript( array_of_hashes_and_pubkeys );
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var scriptaddress = p2wsh.address;
+            var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
+
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                witnessScript: p2wsh.redeem.output,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0020' + bitcoinjs.crypto.sha256( buffer.Buffer.from( witnessscript, 'hex' ) ).toString( 'hex' ), 'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            psbt
+            .addOutput({
+                address: useraddress,
+                value: new_quantity_of_sats,
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( lotteryPrivkey, "hex" ) ) );
+
+            var getFinalScripts = ( txindex, input, script) => {
+                //Step 1: Check to make sure the meaningful locking script matches what you expect.
+                var decompiled = bitcoinjs.script.decompile( script )
+                if ( !decompiled ) {
+                throw new Error( `Can not finalize input #${txindex}` )
+                }
+
+                //Step 2: Create final scripts
+                var stack_elements = [];
+                stack_elements.push( input.partialSig[0].signature );
+                var i; for ( i=0; i<array_of_preimages.length; i++ ) {
+                    stack_elements.push( buffer.Buffer.from( array_of_preimages[ i ], "hex" ) );
+                }
+                var witnessStack = bitcoinjs.payments.p2wsh({
+                    redeem: {
+                        output: script,
+                        input: bitcoinjs.script.compile( stack_elements ),
+                    }
+                });
+                return {
+                    finalScriptWitness: witnessStackToScriptWitness( witnessStack.witness )
+                }
+            }
+            psbt.finalizeInput( 0, getFinalScripts );
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        async function prepareLotteryAddress( e ) {
+            var session = JSON.parse( e.currentTarget.getAttribute( "data-session" ) );
+            var bet_amount = Number( e.currentTarget.getAttribute( "data-bet_amount" ) );
+            var privkey = e.currentTarget.getAttribute( "data-privkey" );
+            var pubkey = e.currentTarget.getAttribute( "data-pubkey" );
+            var preimage = e.currentTarget.getAttribute( "data-preimage" );
+            var winnings_address = e.currentTarget.getAttribute( "data-winnings_address" );
+            //todo: validate that all counterparties submitted valid info (i.e. a sufficiently funded utxo) before relying on it to create transactions
+            var counterparty_info = JSON.parse( document.getElementById( "counterparty" ).value );
+            var players = [];
+            players.push( session );
+            counterparty_info.forEach( function( info ) {
+                players.push( info );
+            })
+            players.sort( function( a, b ) {if ( firstPubkeyIsBigger( a[ "pubkey" ], b[ "pubkey" ] ) ) {return 1;} else {return -1;}});
+            var pubkeys = [];
+            var array_of_hashes_and_pubkeys = [];
+            var array_of_addresses = [];
+            players.forEach( function( player ) {
+                pubkeys.push( player[ "pubkey" ] );
+                var array = [];
+                array.push( player[ "numhash" ], player[ "pubkey" ] );
+                array_of_hashes_and_pubkeys.push( array );
+                array_of_addresses.push( player[ "winnings_address" ] );
+            });
+            players.forEach( function( player, index ) {
+                player[ "collateral_address" ] = collateral( player[ "numhash" ], pubkeys, index );
+            });
+            var array_of_pubkeys = pubkeys;
+            var array_of_addresses_for_lottery_address = btoa( JSON.stringify( array_of_addresses ) );
+            var lotteryAddress = receive( array_of_hashes_and_pubkeys );
+            var mynum = 0;
+            array_of_pubkeys.forEach( function( key, index ) {
+                if ( key == pubkey ) {
+                    mynum = index;
+                }
+            });
+            //todo: make sure the funding psbt uses a reasonable fee, not a hard coded 500 sats 
+            var funding_psbt = startFundingPSBT( bet_amount, players, privkey, lotteryAddress, mynum );
+            var funding_txid = getIdFromPSBT( funding_psbt );
+            console.log( "the funding psbt:", funding_psbt );
+            var pswts = await cosignWithdrawalTransactions( funding_txid, array_of_pubkeys, array_of_addresses, players, privkey, bet_amount, mynum );
+            console.log( "fully signed pswts:" );
+            console.log( JSON.stringify( pswts ) );
+            var fully_signed_collateral_withdrawal_transactions = [];
+            pswts.forEach( function( pswt ) {
+                var collateral_withdrawal_tx = withdrawFromCollateralAddressAsLastSigner( pswt, array_of_pubkeys );
+                fully_signed_collateral_withdrawal_transactions.push( collateral_withdrawal_tx );
+            });
+            console.log( "fully signed collateral withdrawal transactions:" );
+            console.log( JSON.stringify( fully_signed_collateral_withdrawal_transactions ) );
+            var fully_signed_lottery_withdrawal_transaction = await cosignLotteryTransaction( funding_txid, players.length, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses_for_lottery_address, privkey, players, mynum );
+            console.log( "fully signed pslt:" );
+            console.log( fully_signed_lottery_withdrawal_transaction );
+            var fully_signed_pslt_tx = withdrawFromLotteryAddressAsLastSigner( fully_signed_lottery_withdrawal_transaction, array_of_pubkeys );
+            console.log( "fully signed pslt tx:" );
+            console.log( fully_signed_pslt_tx );
+            console.log( "time to fund the transaction! You've got all the signed things" );
+            //todo: validate that this works with info submitted by multiple counterparties
+            var fully_signed_psft = await cosignPSBT( funding_psbt, privkey, mynum, players );
+            console.log( "fully signed psft:" );
+            console.log( fully_signed_psft );
+            var fully_signed_psft_tx = finalizeFundingPSBT( fully_signed_psft );
+            console.log( "fully signed funding tx:" );
+            console.log( fully_signed_psft_tx );
+            var collateral_withdrawal_tx = withdrawFromCollateralAddress( funding_txid, mynum, winnings_address, bet_amount, array_of_pubkeys, privkey, preimage );
+            console.log( "after you broadcast the funding tx it is also time to broadcast the collateral withdrawal tx:" );
+            console.log( collateral_withdrawal_tx );
+            console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
+        }
+    </script>
+    <script>
+        sessionStorage.clear();
+        sessionStorage[ "pswts" ] = "";
+        sessionStorage[ "fully_signed_pswts" ] = "";
+        sessionStorage[ "pslt" ] = "";
+        sessionStorage[ "fully_signed_pslt" ] = "";
+        sessionStorage[ "psbt" ] = "";
+        sessionStorage[ "fully_signed_psbt" ] = "";
+        async function getNote( item ) {
+          async function isNoteSetYet( note_i_seek ) {
+            return new Promise( function( resolve, reject ) {
+              if ( note_i_seek == "" ) {
+                setTimeout( async function() {
+                  var msg = await isNoteSetYet( sessionStorage[ item ] );
+                  resolve( msg );
+                }, 100 );
+              } else {
+                resolve( note_i_seek );
+              }
+            });
+          }
+          async function getTimeoutData() {
+            var note_i_seek = await isNoteSetYet( sessionStorage[ item ] );
+            return note_i_seek;
+          }
+          var returnable = await getTimeoutData();
+          return returnable;
+        }
+    </script>
+    <script>
+        async function cosignWithdrawalTransactions( funding_txid, pubkeys, array_of_addresses, players, privkey, bet_amount, mynum ) {
+            if ( mynum == 0 ) {
+                //create and sign the pswts as the first signer and then pass them upward to the next key
+                var collateral_withdrawal_transactions = [];
+                players.forEach( function( player, index ) {
+                    var withdrawaltx = startWithdrawingFromCollateralAddressAsMultisig( funding_txid, index, pubkeys, array_of_addresses, player[ "numhash" ], privkey, player[ "pubkey" ], bet_amount );
+                    collateral_withdrawal_transactions.push( withdrawaltx );
+                });
+                console.log( "collateral withdrawal transactions with first signature:" );
+                console.log( JSON.stringify( collateral_withdrawal_transactions ) );
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var fully_signed_pswts = await getNote( "fully_signed_pswts" );
+                fully_signed_pswts = JSON.parse( fully_signed_pswts );
+                return fully_signed_pswts;
+            }
+            if ( mynum > 0 ) {
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "pswts" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
+                var pswts = await getNote( "pswts" );
+                pswts = JSON.parse( pswts );
+                new_pswts = [];
+                pswts.forEach( function( withdrawal_psbt ) {
+                    //todo: validate that the transactions are what you expect before signing them
+                    new_pswt = withdrawFromCollateralAddressAsMultisigPartners( withdrawal_psbt, privkey );
+                    new_pswts.push( new_pswt );
+                });
+            }
+            if ( mynum > 0 && mynum < pubkeys.length - 1 ) {
+                console.log( "pswts with your signature:" );
+                console.log( JSON.stringify( new_pswts ) );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var fully_signed_pswts = await getNote( "fully_signed_pswts" );
+                fully_signed_pswts = JSON.parse( fully_signed_pswts );
+                return fully_signed_pswts;
+            }
+            if ( mynum == pubkeys.length - 1 ) {
+                //wait for some pswts from the signer below me, validate and sign them, then send the fully signed pswts to every other key
+                console.log( "remember to send the following pswts to everyone else" );
+                return new_pswts;
+            }
+        }
+    </script>
+    <script>
+        async function cosignLotteryTransaction( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey, players, mynum ) {
+            if ( mynum == 0 ) {
+                var array_of_addresses = JSON.parse( atob( array_of_addresses ) );
+                //create and sign the pslt as the first signer and then pass it upward to the next key
+                var pslt = startWithdrawingFromLotteryAddressAsMultisig( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey );
+                console.log( "pslt with first signature:" );
+                console.log( pslt );
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var fully_signed_pslt = await getNote( "fully_signed_pslt" );
+                return fully_signed_pslt;
+            }
+            if ( mynum > 0 ) {
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                //todo: validate that the transaction is what you expect before signing it
+                var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "pslt" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
+                var pslt = await getNote( "pslt" );
+                var new_pslt = withdrawFromLotteryAddressAsMultisigPartners( pslt, privkey );
+            }
+            if ( mynum > 0 && mynum < players.length - 1 ) {
+                console.log( "pslt with your signature:" );
+                console.log( new_pslt );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var fully_signed_pslt = await getNote( "fully_signed_pslt" );
+                return fully_signed_pslt;
+            }
+            if ( mynum == players.length - 1 ) {
+                //wait for a pslt from the signer below me, validate and sign it, then send the fully signed pslt to every other key
+                console.log( "remember to send the following pslt to everyone else" );
+                return new_pslt;
+            }
+        }
+    </script>
+    <script>
+        async function cosignPSBT( psbthex, privkey, mynum, players ) {
+            if ( mynum == 0 ) {
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var fully_signed_psbt = await getNote( "fully_signed_psbt" );
+                return fully_signed_psbt;
+            }
+            if ( mynum > 0 ) {
+                //todo: validate that the transaction is what you expect before signing it
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "psbt" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
+                var psbt = await getNote( "psbt" );
+                var new_psbt = cosignFundingPSBT( psbt, privkey, mynum );
+            }
+            if ( mynum > 0 && mynum < players.length - 1 ) {
+                console.log( "psbt with your signature:" );
+                console.log( new_psbt );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var fully_signed_psbt = await getNote( "fully_signed_psbt" );
+                return fully_signed_psbt;
+            }
+            if ( mynum == players.length - 1 ) {
+                console.log( "remember to send the following psbt to everyone else" );
+                return new_psbt;
+            }
+        }
+    </script>
+    <script>
+        function getCompressedPubkeyHexFromPrivkeyHex( privkeyhex ) {
+            return bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.testnet } ).publicKey.toString( "hex" );
+        }
+    </script>
+    <script>
+        function createQR( content ) {
+            var dataUriPngImage = document.createElement( "img" ),
+            s = QRCode.generatePNG( content, {
+                ecclevel: 'M',
+                format: 'html',
+                fillcolor: '#FFFFFF',
+                textcolor: '#000000',
+                margin: 4,
+                modulesize: 8,
+            });
+            dataUriPngImage.src = s;
+            dataUriPngImage.id = "qr_code";
+            return dataUriPngImage;
+        }
+    </script>
+    <script>
+        function getData( url ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        resolve( xhttp.responseText );
+                    };
+                }
+                xhttp.open( "GET", url, true );
+                xhttp.send();
+            });
+        }
+    </script>
+</head>
+<body>
+    <p>Bet amount</p>
+    <input type="number" id="bet_amount" name="bet_amount" min="540" value="540" step="1" />
+    <p>Address where your winnings, if any, should go</p>
+    <input type="text" id="winnings_address" name="winnings_address" />
+    <p>Number of players</p>
+    <input type="number" id="num_of_players" name="num_of_players" max="5" min="2" value="2" step="1" />
+    <p>
+        <button id="submitter" type="button">Submit</button>
+    </p>
+    <script>
+        document.getElementById( "submitter" ).addEventListener( "click", function() {
+            var bet_amount = Number( document.getElementById( "bet_amount" ).value );
+            var num_of_players = Number( document.getElementById( "num_of_players" ).value );
+            var winnings_address = document.getElementById( "winnings_address" ).value;
+            var deposit_minimum = ( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + bet_amount + 500;
+            var keypair = bitcoinjs.ECPair.makeRandom();
+            var privkey = keypair.privateKey.toString( "hex" );
+            console.log( "privkey:", privkey );
+            var pubkey = keypair.publicKey.toString( "hex" );
+            var deposit_address = getNativeSegwitAddressFromPrivkeyHex( privkey );
+            var alert_text = `Please deposit at least ${deposit_minimum} sats into the bitcoin address displayed below. The breakdown for this deposit amount is: ${bet_amount} sats will fund the lottery address; 500 sats are reserved for transaction fees; ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } sats serve as collateral, you'll get that part back later (it will go into your winnings address regardless of whether you actually win or not), plus more if you win the lottery. ${bet_amount} + ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } + 500 = ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + 500 + bet_amount } sats`;
+            var qr = document.createElement( "a" );
+            qr.href = "BITCOIN:" + deposit_address.toUpperCase();
+            qr.target = "_blank";
+            qr.append( createQR( deposit_address ) );
+            document.body.append( qr );
+            var p = document.createElement( "p" );
+            p.innerText = deposit_address + " - minimum deposit amount: " + deposit_minimum;
+            document.body.append( p );
+            var title = document.createElement( "p" );
+            title.innerText = "Paste the transaction id of your deposit";
+            document.body.append( title );
+            var input = document.createElement( "input" );
+            input.type = "text";
+            input.id = "txid";
+            input.name = "txid";
+            document.body.append( input );
+            var submit_txid = document.createElement( "button" );
+            submit_txid.type = "button";
+            submit_txid.id = "submit_txid";
+            submit_txid.innerText = "Submit txid";
+            document.body.append( submit_txid );
+            document.getElementById( "submit_txid" ).addEventListener( "click", async function() {
+                var txid = document.getElementById( "txid" ).value;
+                var url = "http://localhost:4200/api/tx/" + txid;
+                var tx = await getData( url );
+                var tx = JSON.parse( tx );
+                var txindex = 202020202020202020;
+                tx[ "vout" ].forEach( function( vout, index ) {
+                    if ( vout[ "scriptpubkey_address" ] == deposit_address ) {
+                        txindex = index;
+                    }
+                });
+                if ( txindex == 202020202020202020 ) {
+                    alert( "nice try but this transaction did not deposit money into the deposit address!" );
+                    window.location.reload();
+                    return;
+                }
+                if ( tx[ "vout" ][ txindex ][ "value" ] < deposit_minimum ) {
+                    alert( "nice try but this transaction did not deposit enough money into the deposit address!" );
+                    window.location.reload();
+                    return;
+                }
+                var rand = Math.floor( Math.random() * ( num_of_players ) );
+                var sixteen_plus_rand = 16 + rand;
+                var preimage = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, ( sixteen_plus_rand * 2 ) );
+                var numhash = bitcoinjs.crypto.hash160( buffer.Buffer.from( preimage, "hex" ) ).toString( "hex" );
+                var session = {}
+                session[ "amount" ] = bet_amount;
+                session[ "num_of_players" ] = num_of_players;
+                session[ "pubkey" ] = pubkey;
+                session[ "winnings_address" ] = winnings_address;
+                session[ "numhash" ] = numhash;
+                session[ "utxo" ] = {}
+                session[ "utxo" ][ "txid" ] = txid;
+                session[ "utxo" ][ "txindex" ] = txindex;
+                session[ "utxo" ][ "value" ] = tx[ "vout" ][ txindex ][ "value" ];
+                console.log( JSON.stringify( session ) );
+                console.log( "random number:", String( rand ) + ",", "preimage:", preimage, "preimage length:", String( preimage.length / 2 ) );
+                var instructions = document.createElement( "p" );
+                instructions.innerText = "Paste an array of one or more objects from your counterparty or counterparties in this format:";
+                document.body.append( instructions );
+                var pre = document.createElement( "pre" );
+                pre.id = "example";
+                pre.name = "example";
+                pre.innerText = 
+`[{
+    "pubkey": "023e7ed9b05826f5a3918755a7b1012aa19c0701345696f70e5998637de68f364a",
+    "numhash": "8cb74f633826472ec0709268506e5b9af9729ef1",
+    "winnings_address": "bcrt1q6kf9sl9kpqvvcck4hemlymm3qst8749jks36y8",
+    "utxo": {
+        "txid": "29316ec7b490892f6bd52ef62f30eca9f2ae35e75904bbf74e7f3f6ba2eecf40",
+        "txindex": 0,
+        "value": 25000
+    }
+}]`;
+                document.body.append( pre );
+                var textarea = document.createElement( "textarea" );
+                textarea.id = "counterparty";
+                textarea.name = "counterparty";
+                textarea.cols = "75";
+                textarea.rows = "10";
+                document.body.append( textarea );
+                var submit_counterparty = document.createElement( "button" );
+                submit_counterparty.type = "button";
+                submit_counterparty.id = "submit_counterparty";
+                submit_counterparty.innerText = "Submit counterparty info";
+                submit_counterparty.setAttribute( "data-session", JSON.stringify( session ) );
+                submit_counterparty.setAttribute( "data-bet_amount", String( bet_amount ) );
+                submit_counterparty.setAttribute( "data-privkey", privkey );
+                submit_counterparty.setAttribute( "data-pubkey", pubkey );
+                submit_counterparty.setAttribute( "data-preimage", preimage );
+                submit_counterparty.setAttribute( "data-winnings_address", winnings_address );
+                document.body.append( submit_counterparty );
+                document.getElementById( "submit_counterparty" ).addEventListener( "click", prepareLotteryAddress );
+            });
+            alert( alert_text );
+        });
+    </script>
+</body>
+</html>
