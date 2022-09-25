@@ -8,7 +8,7 @@
     <script src="https://bundle.run/varuint-bitcoin@1.1.2"></script>
     <script>
         function getNativeSegwitAddressFromPrivkeyHex( privkeyhex ) {
-        return bitcoinjs.payments.p2wpkh({ pubkey: bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.regtest } ).publicKey, network: bitcoinjs.networks.regtest }).address;
+        return bitcoinjs.payments.p2wpkh({ pubkey: bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.testnet } ).publicKey, network: bitcoinjs.networks.testnet }).address;
         }
     </script>
     <script>
@@ -64,7 +64,7 @@
         }
 
         function collateral( hash, pubkeys, mynum ) {
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, pubkeys, mynum ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, pubkeys, mynum ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             return p2wsh.address;
         }
 
@@ -288,7 +288,7 @@
         }
 
         function receive( array_of_hashes_and_pubkeys ) {
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             return p2wsh.address;
         }
     </script>
@@ -319,7 +319,7 @@
     <script>
         function startFundingPSBT( bet_amount, players, privkey, lotteryAddress, mynum ) {
             var num_of_players = players.length;
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             players.forEach( function( player ) {
                 psbt
                 .addInput({
@@ -386,11 +386,11 @@
             var total_fee = 500;
             var quantity_of_sats_each_player_gets_out = Math.floor( bet_amount * num_of_players - ( 500 * ( 1 / ( num_of_players - 1 ) ) ) );
             var witnessscript = generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum );
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             var scriptaddress = p2wsh.address;
             var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
 
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -421,11 +421,11 @@
             var total_fee = 500;
             var quantity_of_sats_each_player_gets_out = Math.floor( original_quantity_of_sats * ( 1 / num_of_players ) ) - Math.ceil( total_fee * ( 1 / num_of_players ) );
             var witnessscript = generateLotteryWitnessScript( array_of_hashes_and_pubkeys );
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             var scriptaddress = p2wsh.address;
             var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
 
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -507,11 +507,11 @@
             var original_quantity_of_sats = bet_amount * num_of_players * ( num_of_players - 1 );
             var new_quantity_of_sats = original_quantity_of_sats - 500;
             var witnessscript = generateCollateralWitnessScript( hash, array_of_pubkeys, mynum );
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, mynum ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, mynum ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             var scriptaddress = p2wsh.address;
             var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
 
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -562,11 +562,11 @@
             var fee_amount = 500;
             var new_quantity_of_sats = original_quantity_of_sats - fee_amount;
             var witnessscript = generateLotteryWitnessScript( array_of_hashes_and_pubkeys );
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.regtest}, network: bitcoinjs.networks.regtest });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             var scriptaddress = p2wsh.address;
             var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
 
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.regtest});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -612,6 +612,34 @@
         }
     </script>
     <script>
+        //todo: make sure the abort transaction uses a reasonable fee, not a hard coded 500 sats
+        function abortLottery( txid, txindex, bet_amount, useraddress, privkey, pubkey, num_of_players ) {
+            var original_quantity_of_sats = ( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + bet_amount + 500;
+            var fee_amount = 500;
+            var new_quantity_of_sats = original_quantity_of_sats - fee_amount;
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0014' +
+                        bitcoinjs.crypto.hash160( buffer.Buffer.from( pubkey, 'hex' ) ).toString( 'hex' ),
+                        'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            psbt
+            .addOutput({
+                address: useraddress,
+                value: new_quantity_of_sats,
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkey, "hex" ) ) );
+            psbt.finalizeAllInputs();
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
         async function prepareLotteryAddress( e ) {
             var session = JSON.parse( e.currentTarget.getAttribute( "data-session" ) );
             var bet_amount = Number( e.currentTarget.getAttribute( "data-bet_amount" ) );
@@ -619,14 +647,26 @@
             var pubkey = e.currentTarget.getAttribute( "data-pubkey" );
             var preimage = e.currentTarget.getAttribute( "data-preimage" );
             var winnings_address = e.currentTarget.getAttribute( "data-winnings_address" );
-            //todo: validate that all counterparties submitted valid info (i.e. a sufficiently funded utxo) before relying on it to create transactions
+            var deposit_minimum = Number( e.currentTarget.getAttribute( "data-deposit_minimum" ) );
             var counterparty_info = JSON.parse( document.getElementById( "counterparty" ).value );
             var players = [];
             players.push( session );
             counterparty_info.forEach( function( info ) {
                 players.push( info );
-            })
+            });
             players.sort( function( a, b ) {if ( firstPubkeyIsBigger( a[ "pubkey" ], b[ "pubkey" ] ) ) {return 1;} else {return -1;}});
+            players.forEach( async function( player, index ) {
+                var txid = player[ "utxo" ][ "txid" ];
+                var txindex = player[ "utxo" ][ "txindex" ];
+                var url = "https://mempool.space/testnet/api/tx/" + txid;
+                var tx = await getData( url );
+                var tx = JSON.parse( tx );
+                if ( tx[ "vout" ][ txindex ][ "value" ] < deposit_minimum ) {
+                    alert( "One of your counterparties did not deposit enough money into their deposit address. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    window.location.reload();
+                    return;
+                }
+            });
             var pubkeys = [];
             var array_of_hashes_and_pubkeys = [];
             var array_of_addresses = [];
@@ -670,7 +710,6 @@
             console.log( "fully signed pslt tx:" );
             console.log( fully_signed_pslt_tx );
             console.log( "time to fund the transaction! You've got all the signed things" );
-            //todo: validate that this works with info submitted by multiple counterparties
             var fully_signed_psft = await cosignPSBT( funding_psbt, privkey, mynum, players );
             console.log( "fully signed psft:" );
             console.log( fully_signed_psft );
@@ -714,13 +753,19 @@
     </script>
     <script>
         async function cosignWithdrawalTransactions( funding_txid, pubkeys, array_of_addresses, players, privkey, bet_amount, mynum ) {
+            var collateral_withdrawal_transactions = [];
+            var collateral_withdrawal_txids = [];
+            players.forEach( function( player, index ) {
+                var withdrawaltx = startWithdrawingFromCollateralAddressAsMultisig( funding_txid, index, pubkeys, array_of_addresses, player[ "numhash" ], privkey, player[ "pubkey" ], bet_amount );
+                collateral_withdrawal_transactions.push( withdrawaltx );
+                collateral_withdrawal_txids.push( getIdFromPSBT( withdrawaltx ) );
+            });
+            var all_pubkeys = [];
+            players.forEach( function( player, index ) {
+                all_pubkeys.push( players[ index ][ "pubkey" ] );
+            });
             if ( mynum == 0 ) {
                 //create and sign the pswts as the first signer and then pass them upward to the next key
-                var collateral_withdrawal_transactions = [];
-                players.forEach( function( player, index ) {
-                    var withdrawaltx = startWithdrawingFromCollateralAddressAsMultisig( funding_txid, index, pubkeys, array_of_addresses, player[ "numhash" ], privkey, player[ "pubkey" ], bet_amount );
-                    collateral_withdrawal_transactions.push( withdrawaltx );
-                });
                 console.log( "collateral withdrawal transactions with first signature:" );
                 console.log( JSON.stringify( collateral_withdrawal_transactions ) );
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
@@ -728,17 +773,71 @@
                 console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pswts = await getNote( "fully_signed_pswts" );
                 fully_signed_pswts = JSON.parse( fully_signed_pswts );
+                fully_signed_pswts.forEach( function( withdrawal_psbt ) {
+                    var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
+                    all_pubkeys.forEach( function( key ) {
+                        if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                            alert( "One or more of your counterparties tried to make you believe a transaction was signed by everyone when it actually wasn't. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                            window.location.reload();
+                            return;
+                        } else {
+                            console.log( "yay! The input has key", key );
+                        }
+                    });
+                    var i_should_continue = false;
+                    var id_of_tx_they_want_me_to_sign = getIdFromPSBT( withdrawal_psbt );
+                    console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                    console.log( "collateral_withdrawal_txids:", JSON.stringify( collateral_withdrawal_txids ) );
+                    if ( collateral_withdrawal_txids.includes( id_of_tx_they_want_me_to_sign ) ) {
+                        console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                        i_should_continue = true;
+                    }
+                    if ( !i_should_continue ) {
+                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    }
+                });
                 return fully_signed_pswts;
             }
             if ( mynum > 0 ) {
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkeys_below_me = [];
+                players.forEach( function( player, index ) {
+                    if ( index < mynum ) {
+                        pubkeys_below_me.push( players[ index ][ "pubkey" ] );
+                    }
+                });
+                console.log( "pubkeys below me:", JSON.stringify( pubkeys_below_me ) );
                 var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "pswts" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
                 var pswts = await getNote( "pswts" );
                 pswts = JSON.parse( pswts );
                 new_pswts = [];
                 pswts.forEach( function( withdrawal_psbt ) {
-                    //todo: validate that the transactions are what you expect before signing them
+                    var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
+                    pubkeys_below_me.forEach( function( key ) {
+                        if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                            alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                            window.location.reload();
+                            return;
+                        } else {
+                            console.log( "yay! The input has key", key );
+                        }
+                    });
+                    var i_should_continue = false;
+                    var id_of_tx_they_want_me_to_sign = getIdFromPSBT( withdrawal_psbt );
+                    console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                    console.log( "collateral_withdrawal_txids:", JSON.stringify( collateral_withdrawal_txids ) );
+                    if ( collateral_withdrawal_txids.includes( id_of_tx_they_want_me_to_sign ) ) {
+                        console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                        i_should_continue = true;
+                    }
+                    if ( !i_should_continue ) {
+                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    }
                     new_pswt = withdrawFromCollateralAddressAsMultisigPartners( withdrawal_psbt, privkey );
                     new_pswts.push( new_pswt );
                 });
@@ -750,6 +849,31 @@
                 console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pswts = await getNote( "fully_signed_pswts" );
                 fully_signed_pswts = JSON.parse( fully_signed_pswts );
+                fully_signed_pswts.forEach( function( withdrawal_psbt ) {
+                    var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
+                    all_pubkeys.forEach( function( key ) {
+                        if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                            alert( "One or more of your counterparties tried to make you believe a transaction was signed by everyone when it actually wasn't. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                            window.location.reload();
+                            return;
+                        } else {
+                            console.log( "yay! The input has key", key );
+                        }
+                    });
+                    var i_should_continue = false;
+                    var id_of_tx_they_want_me_to_sign = getIdFromPSBT( withdrawal_psbt );
+                    console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                    console.log( "collateral_withdrawal_txids:", JSON.stringify( collateral_withdrawal_txids ) );
+                    if ( collateral_withdrawal_txids.includes( id_of_tx_they_want_me_to_sign ) ) {
+                        console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                        i_should_continue = true;
+                    }
+                    if ( !i_should_continue ) {
+                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    }
+                });
                 return fully_signed_pswts;
             }
             if ( mynum == pubkeys.length - 1 ) {
@@ -761,24 +885,82 @@
     </script>
     <script>
         async function cosignLotteryTransaction( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey, players, mynum ) {
+            var all_pubkeys = [];
+            players.forEach( function( player, index ) {
+                all_pubkeys.push( players[ index ][ "pubkey" ] );
+            });
+            var array_of_addresses = JSON.parse( atob( array_of_addresses ) );
             if ( mynum == 0 ) {
-                var array_of_addresses = JSON.parse( atob( array_of_addresses ) );
                 //create and sign the pslt as the first signer and then pass it upward to the next key
                 var pslt = startWithdrawingFromLotteryAddressAsMultisig( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey );
+                var expected_pslt_txid = getIdFromPSBT( pslt );
                 console.log( "pslt with first signature:" );
                 console.log( pslt );
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pslt = await getNote( "fully_signed_pslt" );
+                var psbt = bitcoinjs.Psbt.fromHex( fully_signed_pslt );
+                all_pubkeys.forEach( function( key ) {
+                    if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( fully_signed_pslt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_pslt_txid );
+                if ( expected_pslt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    window.location.reload();
+                    return;
+                }
                 return fully_signed_pslt;
             }
             if ( mynum > 0 ) {
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
-                //todo: validate that the transaction is what you expect before signing it
+                var pubkeys_below_me = [];
+                players.forEach( function( player, index ) {
+                    if ( index < mynum ) {
+                        pubkeys_below_me.push( players[ index ][ "pubkey" ] );
+                    }
+                });
+                var expected_pslt = startWithdrawingFromLotteryAddressAsMultisig( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey );
+                var expected_pslt_txid = getIdFromPSBT( expected_pslt );
                 var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "pslt" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
                 var pslt = await getNote( "pslt" );
+                var psbt = bitcoinjs.Psbt.fromHex( pslt );
+                pubkeys_below_me.forEach( function( key ) {
+                    if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( pslt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_pslt_txid );
+                if ( expected_pslt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    window.location.reload();
+                    return;
+                }
                 var new_pslt = withdrawFromLotteryAddressAsMultisigPartners( pslt, privkey );
             }
             if ( mynum > 0 && mynum < players.length - 1 ) {
@@ -787,6 +969,31 @@
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pslt = await getNote( "fully_signed_pslt" );
+                var expected_pslt = startWithdrawingFromLotteryAddressAsMultisig( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey );
+                var expected_pslt_txid = getIdFromPSBT( expected_pslt );
+                var psbt = bitcoinjs.Psbt.fromHex( fully_signed_pslt );
+                all_pubkeys.forEach( function( key ) {
+                    if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( fully_signed_pslt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_pslt_txid );
+                if ( expected_pslt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    window.location.reload();
+                    return;
+                }
                 return fully_signed_pslt;
             }
             if ( mynum == players.length - 1 ) {
@@ -798,19 +1005,78 @@
     </script>
     <script>
         async function cosignPSBT( psbthex, privkey, mynum, players ) {
+            var all_pubkeys = [];
+            players.forEach( function( player, index ) {
+                all_pubkeys.push( players[ index ][ "pubkey" ] );
+            });
             if ( mynum == 0 ) {
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var expected_psbt = psbthex;
+                var expected_psbt_txid = getIdFromPSBT( expected_psbt );
                 var fully_signed_psbt = await getNote( "fully_signed_psbt" );
+                var decoded_psbt = bitcoinjs.Psbt.fromHex( fully_signed_psbt );
+                all_pubkeys.forEach( function( key, index ) {
+                    if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( fully_signed_psbt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_psbt_txid );
+                if ( expected_psbt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    window.location.reload();
+                    return;
+                }
                 return fully_signed_psbt;
             }
             if ( mynum > 0 ) {
-                //todo: validate that the transaction is what you expect before signing it
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkeys_below_me = [];
+                players.forEach( function( player, index ) {
+                    if ( index < mynum ) {
+                        pubkeys_below_me.push( players[ index ][ "pubkey" ] );
+                    }
+                });
+                var expected_psbt = psbthex;
+                var expected_psbt_txid = getIdFromPSBT( expected_psbt );
                 var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "psbt" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
                 var psbt = await getNote( "psbt" );
+                var decoded_psbt = bitcoinjs.Psbt.fromHex( psbt );
+                pubkeys_below_me.forEach( function( key, index ) {
+                    if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( psbt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_psbt_txid );
+                if ( expected_psbt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    window.location.reload();
+                    return;
+                }
                 var new_psbt = cosignFundingPSBT( psbt, privkey, mynum );
             }
             if ( mynum > 0 && mynum < players.length - 1 ) {
@@ -819,6 +1085,29 @@
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_psbt = await getNote( "fully_signed_psbt" );
+                var decoded_psbt = bitcoinjs.Psbt.fromHex( fully_signed_psbt );
+                all_pubkeys.forEach( function( key, index ) {
+                    if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        window.location.reload();
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( fully_signed_psbt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_psbt_txid );
+                if ( expected_psbt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    window.location.reload();
+                    return;
+                }
                 return fully_signed_psbt;
             }
             if ( mynum == players.length - 1 ) {
@@ -908,7 +1197,7 @@
             document.body.append( submit_txid );
             document.getElementById( "submit_txid" ).addEventListener( "click", async function() {
                 var txid = document.getElementById( "txid" ).value;
-                var url = "http://localhost:4200/api/tx/" + txid;
+                var url = "https://mempool.space/testnet/api/tx/" + txid;
                 var tx = await getData( url );
                 var tx = JSON.parse( tx );
                 var txindex = 202020202020202020;
@@ -927,6 +1216,7 @@
                     window.location.reload();
                     return;
                 }
+                sessionStorage[ "abortLotteryTx" ] = abortLottery( txid, txindex, bet_amount, winnings_address, privkey, pubkey, num_of_players );
                 var rand = Math.floor( Math.random() * ( num_of_players ) );
                 var sixteen_plus_rand = 16 + rand;
                 var preimage = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, ( sixteen_plus_rand * 2 ) );
@@ -977,6 +1267,7 @@
                 submit_counterparty.setAttribute( "data-pubkey", pubkey );
                 submit_counterparty.setAttribute( "data-preimage", preimage );
                 submit_counterparty.setAttribute( "data-winnings_address", winnings_address );
+                submit_counterparty.setAttribute( "data-deposit_minimum", deposit_minimum );
                 document.body.append( submit_counterparty );
                 document.getElementById( "submit_counterparty" ).addEventListener( "click", prepareLotteryAddress );
             });
