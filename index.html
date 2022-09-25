@@ -1211,12 +1211,12 @@
                     window.location.reload();
                     return;
                 }
+                sessionStorage[ "abortLotteryTx" ] = abortLottery( txid, txindex, bet_amount, winnings_address, privkey, pubkey, num_of_players );
                 if ( tx[ "vout" ][ txindex ][ "value" ] < deposit_minimum ) {
-                    alert( "nice try but this transaction did not deposit enough money into the deposit address!" );
+                    alert( "nice try but this transaction did not deposit enough money into the deposit address! Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
                     window.location.reload();
                     return;
                 }
-                sessionStorage[ "abortLotteryTx" ] = abortLottery( txid, txindex, bet_amount, winnings_address, privkey, pubkey, num_of_players );
                 var rand = Math.floor( Math.random() * ( num_of_players ) );
                 var sixteen_plus_rand = 16 + rand;
                 var preimage = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, ( sixteen_plus_rand * 2 ) );
