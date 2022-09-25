@@ -1173,14 +1173,14 @@
             console.log( "privkey:", privkey );
             var pubkey = keypair.publicKey.toString( "hex" );
             var deposit_address = getNativeSegwitAddressFromPrivkeyHex( privkey );
-            var alert_text = `Please deposit at least ${deposit_minimum} sats into the bitcoin address displayed below. The breakdown for this deposit amount is: ${bet_amount} sats will fund the lottery address; 500 sats are reserved for transaction fees; ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } sats serve as collateral, you'll get that part back later (it will go into your winnings address regardless of whether you actually win or not), plus more if you win the lottery. ${bet_amount} + ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } + 500 = ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + 500 + bet_amount } sats`;
+            var alert_text = `Please deposit exactly ${deposit_minimum} sats into the bitcoin address displayed below. The breakdown for this deposit amount is: ${bet_amount} sats will fund the lottery address; 500 sats are reserved for transaction fees; ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } sats serve as collateral, you'll get that part back later (it will go into your winnings address regardless of whether you actually win or not), plus more if you win the lottery. ${bet_amount} + ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } + 500 = ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + 500 + bet_amount } sats`;
             var qr = document.createElement( "a" );
             qr.href = "BITCOIN:" + deposit_address.toUpperCase();
             qr.target = "_blank";
             qr.append( createQR( deposit_address ) );
             document.body.append( qr );
             var p = document.createElement( "p" );
-            p.innerText = deposit_address + " - minimum deposit amount: " + deposit_minimum;
+            p.innerText = deposit_address + " - precise deposit amount: " + deposit_minimum + " sats";
             document.body.append( p );
             var title = document.createElement( "p" );
             title.innerText = "Paste the transaction id of your deposit";
@@ -1212,8 +1212,8 @@
                     return;
                 }
                 sessionStorage[ "abortLotteryTx" ] = abortLottery( txid, txindex, bet_amount, winnings_address, privkey, pubkey, num_of_players );
-                if ( tx[ "vout" ][ txindex ][ "value" ] < deposit_minimum ) {
-                    alert( "nice try but this transaction did not deposit enough money into the deposit address! Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                if ( tx[ "vout" ][ txindex ][ "value" ] != deposit_minimum ) {
+                    alert( "nice try but this transaction did not deposit the right amount of money into the deposit address! Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
                     window.location.reload();
                     return;
                 }
