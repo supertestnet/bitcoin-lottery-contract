@@ -2,7 +2,18 @@
 <html>
 <head>
     <meta charset="UTF-8">
+    <style>
+        html {
+          max-width: 70ch;
+          padding: 3em 1em;
+          margin: auto;
+          line-height: 1.25;
+          font-size: 20px;
+        }
+    </style>
     <script src="https://bitcoincore.tech/apps/bitcoinjs-ui/lib/bitcoinjs-lib.js"></script>
+    <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
+    <script src="https://bundle.run/browserify-cipher@1.0.1"></script>
     <script src="https://bundle.run/buffer@6.0.3"></script>
     <script src="https://supertestnet.github.io/bitcoin-chess/js/qrcode.js"></script>
     <script src="https://bundle.run/varuint-bitcoin@1.1.2"></script>
@@ -716,10 +727,41 @@
             var fully_signed_psft_tx = finalizeFundingPSBT( fully_signed_psft );
             console.log( "fully signed funding tx:" );
             console.log( fully_signed_psft_tx );
+            pushBTCpmt( fully_signed_psft_tx );
             var collateral_withdrawal_tx = withdrawFromCollateralAddress( funding_txid, mynum, winnings_address, bet_amount, array_of_pubkeys, privkey, preimage );
             console.log( "after you broadcast the funding tx it is also time to broadcast the collateral withdrawal tx:" );
             console.log( collateral_withdrawal_tx );
+            setTimeout( function() {pushBTCpmt( collateral_withdrawal_tx );}, 3000 );
             console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
+            //todo: this part needs work -- it assumes only two players are playing
+            var other_address = "";
+            var other_hash = "";
+            players.forEach( function( player, index ) {
+                if ( index != mynum ) {
+                    other_address = player[ "collateral_address" ];
+                    other_hash = player[ "numhash" ];
+                }
+            });
+            var moneyWasSpent = await waitForMoneyToLeaveAddress( other_address );
+            if ( moneyWasSpent ) {
+                var other_preimage = await preimageLooper( other_address, other_hash );
+                var theirPreimageLength = other_preimage.length / 2;
+                var myPreimageLength = preimage.length / 2;
+                if ( theirPreimageLength == myPreimageLength && mynum == 0 ) {
+                    console.log( "I win!" );
+                    var array_of_preimages = [ preimage, other_preimage ];
+                    var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
+                    console.log( "here is the winning transaction:", winning_tx );
+                    pushBTCpmt( winning_tx );
+                }
+                if ( theirPreimageLength != myPreimageLength && mynum == 1 ) {
+                    console.log( "I win!" );
+                    var array_of_preimages = [ other_preimage, preimage ];
+                    var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
+                    console.log( "here is the winning transaction:", winning_tx );
+                    pushBTCpmt( winning_tx );
+                }
+            }
         }
     </script>
     <script>
@@ -769,6 +811,12 @@
                 console.log( "collateral withdrawal transactions with first signature:" );
                 console.log( JSON.stringify( collateral_withdrawal_transactions ) );
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid pswts";
+                sendable[ "mid_pswts" ] = JSON.stringify( collateral_withdrawal_transactions );
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pswts = await getNote( "fully_signed_pswts" );
@@ -845,6 +893,12 @@
             if ( mynum > 0 && mynum < pubkeys.length - 1 ) {
                 console.log( "pswts with your signature:" );
                 console.log( JSON.stringify( new_pswts ) );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid pswts";
+                sendable[ "mid_pswts" ] = JSON.stringify( new_pswts );
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pswts = await getNote( "fully_signed_pswts" );
@@ -879,6 +933,17 @@
             if ( mynum == pubkeys.length - 1 ) {
                 //wait for some pswts from the signer below me, validate and sign them, then send the fully signed pswts to every other key
                 console.log( "remember to send the following pswts to everyone else" );
+                var sendable = {}
+                sendable[ "msg_type" ] = "finalized pswts";
+                sendable[ "finalized_pswts" ] = JSON.stringify( new_pswts );
+                var player_pubkeys = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    player_pubkeys.push( document.getElementsByClassName( "player_pubkey" )[ i ].value );
+                }
+                player_pubkeys.forEach( function( pubkey, index ) {
+                    num_of_seconds = ( index + 1 ) * 1000;
+                    setTimeout( function() {sendDM( JSON.stringify( sendable ), pubkey );}, num_of_seconds );
+                });
                 return new_pswts;
             }
         }
@@ -897,6 +962,12 @@
                 console.log( "pslt with first signature:" );
                 console.log( pslt );
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid pslt";
+                sendable[ "mid_pslt" ] = pslt;
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pslt = await getNote( "fully_signed_pslt" );
@@ -966,6 +1037,12 @@
             if ( mynum > 0 && mynum < players.length - 1 ) {
                 console.log( "pslt with your signature:" );
                 console.log( new_pslt );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid pslt";
+                sendable[ "mid_pslt" ] = new_pslt;
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pslt = await getNote( "fully_signed_pslt" );
@@ -999,6 +1076,17 @@
             if ( mynum == players.length - 1 ) {
                 //wait for a pslt from the signer below me, validate and sign it, then send the fully signed pslt to every other key
                 console.log( "remember to send the following pslt to everyone else" );
+                var sendable = {}
+                sendable[ "msg_type" ] = "finalized pslt";
+                sendable[ "finalized_pslt" ] = new_pslt;
+                var player_pubkeys = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    player_pubkeys.push( document.getElementsByClassName( "player_pubkey" )[ i ].value );
+                }
+                player_pubkeys.forEach( function( pubkey, index ) {
+                    num_of_seconds = ( index + 1 ) * 1000;
+                    setTimeout( function() {sendDM( JSON.stringify( sendable ), pubkey );}, num_of_seconds );
+                });
                 return new_pslt;
             }
         }
@@ -1011,6 +1099,12 @@
             });
             if ( mynum == 0 ) {
                 console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid psft";
+                sendable[ "mid_psft" ] = psbthex;
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var expected_psbt = psbthex;
@@ -1082,6 +1176,12 @@
             if ( mynum > 0 && mynum < players.length - 1 ) {
                 console.log( "psbt with your signature:" );
                 console.log( new_psbt );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid psft";
+                sendable[ "mid_psft" ] = new_psbt;
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_psbt = await getNote( "fully_signed_psbt" );
@@ -1112,6 +1212,17 @@
             }
             if ( mynum == players.length - 1 ) {
                 console.log( "remember to send the following psbt to everyone else" );
+                var sendable = {}
+                sendable[ "msg_type" ] = "finalized psft";
+                sendable[ "finalized_psft" ] = new_psbt;
+                var player_pubkeys = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    player_pubkeys.push( document.getElementsByClassName( "player_pubkey" )[ i ].value );
+                }
+                player_pubkeys.forEach( function( pubkey, index ) {
+                    num_of_seconds = ( index + 1 ) * 1000;
+                    setTimeout( function() {sendDM( JSON.stringify( sendable ), pubkey );}, num_of_seconds );
+                });
                 return new_psbt;
             }
         }
@@ -1151,21 +1262,572 @@
             });
         }
     </script>
+    <script>
+        function getTransactionsInvolvingAddress( address ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        var txs = [];
+                        var i; for ( i=0; i<json.length; i++ ) {
+                            txs.push( json[ i ][ "txid" ] );
+                        }
+                        resolve( JSON.stringify( txs ) );
+                    }
+                };
+                xhttp.open("GET", "https://mempool.space/testnet/api/address/" + address + "/txs", true);
+                xhttp.send();
+            });                
+        }
+
+        function waitSomeSeconds( num ) {
+          var num = num.toString() + "000";
+          num = Number( num );
+          return new Promise( function( resolve, reject ) {
+            setTimeout( function() { resolve( "I am waiting ten seconds because sometimes esplora updates intermittently where it knows a txid is associated with an address but does not have the info for that txid yet" ); }, num );
+          });
+        }
+
+        function takeTxsAndGetPreimageFromThem( txs, hash ) {
+            return new Promise( async function( resolve, reject ) {
+                if ( txs.length > 1 ) {
+                    console.log( "here comes the ten second timeout" );
+                    var timeout = await waitSomeSeconds( 10 );
+                    console.log( "ok the ten second timeout is done, let's continue" );
+                    txs.forEach( async function( tx ) {
+                        console.log( tx );
+                        var possible_preimage = await getPreimageFromTransactionThatSpendsAnHTLC( tx, hash );
+                        console.log( "here is the possible preimage I got (remember that it might be blank):", possible_preimage );
+                        console.log( "if it is blank I will ignore it" );
+                        if ( possible_preimage ) {
+                            if ( possible_preimage.length > 31 ) {
+                                console.log( "it was the right size so I will now return it (by the way, this is it:", possible_preimage );
+                                resolve( possible_preimage );
+                            }
+                        }
+                    });
+                } else {
+                    resolve( "" );
+                }
+            });
+        }
+
+        async function getSweepablePreimageFromAllPossibilities( address, hash ) {
+            return new Promise( async function( resolve, reject ) {
+                var txs = await getTransactionsInvolvingAddress( address );
+                var txs = JSON.parse( txs );
+                var preimage = "";
+                console.log( "Ok I am trying to get the preimage for this hash:", hash );
+                console.log( "here are the transactions I can search for it in (remember that it might be blank, in which case I will just rerun in a bit):" );
+                preimage += await takeTxsAndGetPreimageFromThem( txs, hash )
+                console.log( "the preimage I will return is", preimage );
+                resolve( preimage );
+            });
+        }
+
+        function getBlockheight() {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var blockheight = Number( xhttp.responseText );
+                        resolve( blockheight );
+                    }
+                };
+                xhttp.open( "GET", "https://mempool.space/testnet/api/blocks/tip/height", true );
+                xhttp.send();
+            });
+        }
+        function preimageLooper( address, hash ) {
+            return new Promise( async function( resolve, reject ) {
+                var preimage = await getSweepablePreimageFromAllPossibilities( address, hash );
+                if ( !preimage || preimage == "" ) {
+                    setTimeout( async function() {
+                        console.log( "loading preimage for hash", hash + "..." );
+                        var preimage = await preimageLooper( address, hash );
+                        resolve( preimage );
+                    }, 15000 );
+                } else {
+                    resolve( preimage );
+                }
+            });
+        }
+        async function howManyConfs( txid ) {
+            var blockheight = await getBlockheight();
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        if ( json[ "status" ][ "confirmed" ] ) {
+                            resolve( ( Number( blockheight ) - Number( json[ "status" ][ "block_height" ] ) ) + 1 );
+                        } else {
+                            resolve( "0".toString() );
+                        }
+                    }
+                };
+                xhttp.open( "GET", "https://mempool.space/testnet/api/tx/" + txid, true );
+                xhttp.send();
+            });
+        }
+        async function getIdOfTxThatSentMoneyToAddress( address ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        json.reverse();
+                        var counter = 0;
+                        json.forEach( function( tx ) {
+                            tx[ "vout" ].forEach( function( vout ) {
+                                if ( counter == 0 ) {
+                                    if ( "scriptpubkey_address" in vout && vout[ "scriptpubkey_address" ] == address ) {
+                                        resolve( tx[ "txid" ] );
+                                        counter = counter + 1;
+                                    }
+                                }
+                            });
+                        });
+                        resolve( "none" );
+                    }
+                };
+                xhttp.open( "GET", "https://mempool.space/testnet/api/address/" + address + "/txs", true );
+                xhttp.send();
+            });
+        }
+        //this function returns true if the address received money or false if it did not
+        function addressOnceHadMoney( address ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        if ( json[ "chain_stats" ][ "funded_txo_count" ] > 0 || json[ "mempool_stats" ][ "funded_txo_count" ] > 0 ) {
+                            resolve( true );
+                        }
+                        resolve( false );
+                    }
+                };
+                xhttp.open( "GET", "https://mempool.space/testnet/api/address/" + address, true );
+                xhttp.send();
+            });
+        }
+        //this function waits until money arrives in an address, checking every five seconds, and then returns true -- it never returns false but it can hang forever
+        async function waitForMoneyToArriveInAddress( address ) {
+            async function isAddressFundedYet( address ) {
+                var address_received_money = await addressOnceHadMoney( address );
+                return new Promise( function( resolve, reject ) {
+                    if ( !address_received_money ) {
+                        setTimeout( async function() {
+                            var msg = await isAddressFundedYet( address );
+                            resolve( msg );
+                        }, 5000 );
+                    } else {
+                        resolve( address_received_money );
+                    }
+                });
+            }
+            async function getTimeoutData() {
+                var address_received_money = await isAddressFundedYet( address );
+                return address_received_money;
+            }
+            var returnable = await getTimeoutData();
+            return returnable;
+        }
+        function pushBTCpmt( rawtx ) {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function() {
+                if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                    var response = this.responseText;
+                    console.log( "Your transaction was broadcasted, your txid is: " + response );
+                }
+            };
+            xhttp.open( "POST", "https://mempool.space/testnet/api/tx", true );
+            xhttp.send( rawtx );
+        }
+        //this function returns true if the address sent money or false if it did not
+        function addressOnceSentMoney( address ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && this.status == 200 ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        if ( json[ "chain_stats" ][ "spent_txo_count" ] > 0 || json[ "mempool_stats" ][ "spent_txo_count" ] > 0 ) {
+                            resolve( true );
+                        }
+                        resolve( false );
+                    }
+                };
+                xhttp.open( "GET", "https://mempool.space/testnet/api/address/" + address, true );
+                xhttp.send();
+            });
+        }
+        //this function waits until money leaves an address, checking every five seconds, and then returns true -- it never returns false but it can hang forever
+        async function waitForMoneyToLeaveAddress( address ) {
+            async function hasAddressSentOutYet( address ) {
+                var address_sent_money = await addressOnceSentMoney( address );
+                return new Promise( function( resolve, reject ) {
+                    if ( !address_sent_money ) {
+                        setTimeout( async function() {
+                            var msg = await hasAddressSentOutYet( address );
+                            resolve( msg );
+                        }, 5000 );
+                    } else {
+                        resolve( address_sent_money );
+                    }
+                });
+            }
+            async function getTimeoutData() {
+                var address_sent_money = await hasAddressSentOutYet( address );
+                return address_sent_money;
+            }
+            var returnable = await getTimeoutData();
+            return returnable;
+        }
+        function getPreimageFromTransactionThatSpendsAnHTLC( txid, pmthash ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if (this.readyState == 4 && this.status == 200) {
+                        var json = JSON.parse( xhttp.responseText );
+                        var i; for ( i=0; i<json[ "vin" ].length; i++ ) {
+                            var j; for ( j=0; j<json[ "vin" ][ i ][ "witness" ].length; j++ ) {
+                                if ( bitcoinjs.crypto.hash160( buffer.Buffer.from( json[ "vin" ][ i ][ "witness" ][ j ], "hex" ) ).toString( "hex" ) == pmthash ) {
+                                    resolve( json[ "vin" ][ i ][ "witness" ][ j ] );
+                                }
+                            }
+                        }
+                        resolve( "" );
+                    }
+                };
+                xhttp.open("GET", "https://blockstream.info/testnet/api/tx/" + txid, true);
+                xhttp.send();
+            });
+        }
+    </script>
+    <script>
+        //this function waits until a roster of players is full, checking every five seconds, and then returns true -- it never returns false but it can hang forever
+        async function waitForFullRoster() {
+            async function isRosterFullYet() {
+                var roster_is_full = await rosterIsFull();
+                return new Promise( function( resolve, reject ) {
+                    if ( !roster_is_full ) {
+                        setTimeout( async function() {
+                            var msg = await isRosterFullYet();
+                            resolve( msg );
+                        }, 5000 );
+                    } else {
+                        resolve( roster_is_full );
+                    }
+                });
+            }
+            async function getTimeoutData() {
+                var roster_is_full = await isRosterFullYet();
+                return roster_is_full;
+            }
+            var returnable = await getTimeoutData();
+            return returnable;
+        }
+    </script>
+    <script>
+        function rosterIsFull() {
+            if ( !sessionStorage[ "num_of_players" ] ) {
+                return false;
+            }
+            if ( !sessionStorage[ "info_about_the_players" ] || sessionStorage[ "info_about_the_players" ] == "" ) {
+                var info_about_the_players = [];
+                sessionStorage[ "info_about_the_players" ] = JSON.stringify( info_about_the_players );
+            } else {
+                var info_about_the_players = JSON.parse( sessionStorage[ "info_about_the_players" ] );
+            }
+            if ( info_about_the_players.length == Number( sessionStorage[ "num_of_players" ] - 1 ) ) {
+                return true;
+            }
+        }
+    </script>
+    <script>
+        function takeNextSteps( message, player_pubkey ) {
+            var message = JSON.parse( message );
+            if ( message[ "msg_type" ] == "session data" ) {
+                var it_was_a_duplicate = false;
+                sessionStorage[ "num_of_players" ] = message[ "session" ][ "num_of_players" ];
+                //this section adds player info to a roster in session storage -- when the roster and my deposit address are full I can click prepareLotteryAddress
+                if ( !sessionStorage[ "info_about_the_players" ] || sessionStorage[ "info_about_the_players" ] == "" ) {
+                    var info_about_the_players = [];
+                    info_about_the_players.push( message[ "session" ] );
+                    sessionStorage[ "info_about_the_players" ] = JSON.stringify( info_about_the_players );
+                } else {
+                    var info_about_the_players = JSON.parse( sessionStorage[ "info_about_the_players" ] );
+                    var known_pubkeys = [];
+                    info_about_the_players.forEach( function( player ) {
+                        known_pubkeys.push( player[ "pubkey" ] );
+                    });
+                    if ( !known_pubkeys.includes( message[ "session" ][ "pubkey" ] ) ) {
+                        info_about_the_players.push( message[ "session" ] );
+                        sessionStorage[ "info_about_the_players" ] = JSON.stringify( info_about_the_players );
+                    } else {
+                        it_was_a_duplicate = true
+                    }
+                }
+                //check if the roster is full; if it isn't, wait for more info; if it is, check if the qr code is displayed; if it is, wait for more info; if it is not, display it
+                if ( !it_was_a_duplicate ) {
+                    console.log( `${player_pubkey} joined your game!` );
+                }
+                var i_should_add_a_pubkey_to_the_list = true;
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    if ( document.getElementsByClassName( "player_pubkey" )[ i ].value == player_pubkey ) {
+                        i_should_add_a_pubkey_to_the_list = false;
+                    }
+                }
+                if ( i_should_add_a_pubkey_to_the_list ) {
+                    var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                        if ( !document.getElementsByClassName( "player_pubkey" )[ i ].value || document.getElementsByClassName( "player_pubkey" )[ i ].value == "" ) {
+                            document.getElementsByClassName( "player_pubkey" )[ i ].value = player_pubkey;
+                        }
+                    }
+                }
+                var one_of_the_pubkeys_in_the_list_is_the_one_i_added = false;
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    if ( document.getElementsByClassName( "player_pubkey" )[ i ].value == player_pubkey ) {
+                        one_of_the_pubkeys_in_the_list_is_the_one_i_added = true;
+                    }
+                }
+                if ( !one_of_the_pubkeys_in_the_list_is_the_one_i_added ) {
+                    makeAnotherPlayer();
+                }
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    if ( !document.getElementsByClassName( "player_pubkey" )[ i ].value || document.getElementsByClassName( "player_pubkey" )[ i ].value == "" ) {
+                        document.getElementsByClassName( "player_pubkey" )[ i ].value = player_pubkey;
+                    }
+                }
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    if ( document.getElementsByClassName( "player_pubkey" )[ i ].value == player_pubkey ) {
+                        document.getElementsByClassName( "player_pubkey" )[ i ].setAttribute( "data-in_game_pubkey", message[ "session" ][ "pubkey" ] );
+                    }
+                }
+                if ( rosterIsFull() ) {
+                    if ( document.getElementById( "submitter" ) ) {
+                        document.getElementById( "submitter" ).click();
+                    }
+                }
+            }
+            if ( message[ "msg_type" ] == "mid pswts" ) {
+                sessionStorage[ "pswts" ] = message[ "mid_pswts" ];
+            }
+            if ( message[ "msg_type" ] == "finalized pswts" ) {
+                sessionStorage[ "fully_signed_pswts" ] = message[ "finalized_pswts" ];
+            }
+            if ( message[ "msg_type" ] == "mid pslt" ) {
+                sessionStorage[ "pslt" ] = message[ "mid_pslt" ];
+            }
+            if ( message[ "msg_type" ] == "finalized pslt" ) {
+                sessionStorage[ "fully_signed_pslt" ] = message[ "finalized_pslt" ];
+            }
+            if ( message[ "msg_type" ] == "mid psft" ) {
+                sessionStorage[ "psbt" ] = message[ "mid_psft" ];
+            }
+            if ( message[ "msg_type" ] == "finalized psft" ) {
+                sessionStorage[ "fully_signed_psbt" ] = message[ "finalized_psft" ];
+            }
+        }
+    </script>
+    <script>
+        var { getSharedSecret, schnorr, utils } = nobleSecp256k1
+        var crypto  = window.crypto 
+        var getRand = size => crypto.getRandomValues(new Uint8Array(size))
+        var sha256  = bitcoinjs.crypto.sha256
+        var nostr_keypair = bitcoinjs.ECPair.makeRandom()
+        var nostr_privKey = nostr_keypair.privateKey.toString( "hex" )
+        var nostr_pubKey  = nostr_keypair.publicKey.toString( "hex" )
+        nostr_pubKey      = nostr_pubKey.substring( 2 )
+        console.log( "nostr_pubKey:", nostr_pubKey );
+        var relay = "wss://relay.damus.io";
+        var socket = new WebSocket( relay );
+        socket.addEventListener('message', async function( message ) {
+            var [ type, subId, event ] = JSON.parse( message.data );
+            var { kind, content } = event || {}
+            if (!event) return
+            var sig_is_valid = await nobleSecp256k1.schnorr.verify( event.sig, event.id, event.pubkey );
+            if (!sig_is_valid) return
+            if (kind === 4) {
+                content = decrypt(nostr_privKey, event.pubkey, content)
+            }
+            takeNextSteps( content, event.pubkey );
+        });
+        var subId   = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" )
+        var filter  = { "#p": [ nostr_pubKey ] }
+        socket.addEventListener('open', async function( e ) {
+            console.log( "connected to " + relay );
+            var subscription = [ "REQ", subId, filter ];
+            socket.send( JSON.stringify( subscription ) );
+/*
+            var event = {
+                "content"    : "this workshop is awesome!",
+                "created_at" : Math.floor( Date.now() / 1000 ),
+                "kind"       : 1,
+                "tags"       : [],
+                "pubkey"     : nostr_pubKey,
+            }
+            var signedEvent = await getSignedEvent(event, nostr_privKey)
+            console.log('signedEvent:', signedEvent)
+            socket.send(JSON.stringify([ "EVENT", signedEvent ]))
+*/
+        })
+
+        async function sendDM( message, recipient ) {
+            var encrypted_message = encrypt( nostr_privKey, recipient, message )
+            var encrypted_event = {
+                "content"    : encrypted_message,
+                "created_at" : Math.floor( Date.now() / 1000 ),
+                "kind"       : 4,
+                "tags"       : [ [ 'p', recipient ] ],
+                "pubkey"     : nostr_pubKey,
+            }
+            var signedEncryptedEvent = await getSignedEvent( encrypted_event, nostr_privKey );
+            socket.send( JSON.stringify( [ "EVENT", signedEncryptedEvent ] ) );
+        }
+
+        async function getSignedEvent(event, privateKey) {
+            var eventData = JSON.stringify([
+                0,                    // Reserved for future use
+                event['pubkey'],        // The sender's public key
+                event['created_at'],    // Unix timestamp
+                event['kind'],        // Message “kind” or type
+                event['tags'],        // Tags identify replies/recipients
+                event['content']        // Your note contents
+            ])
+            event.id  = sha256( eventData ).toString( 'hex' )
+            event.sig = await schnorr.sign( event.id, privateKey ) 
+            return event
+        }
+        function hexToBytes( hex ) {
+            return Uint8Array.from( hex.match( /.{1,2}/g ).map( ( byte ) => parseInt( byte, 16 ) ) );
+        }
+
+        function bytesToHex( bytes ) {
+            return bytes.reduce( ( str, byte ) => str + byte.toString( 16 ).padStart( 2, '0' ), '' );
+        }
+        function base64ToHex( str ) {
+            var raw = atob( str );
+            var result = '';
+            var i; for ( i=0; i<raw.length; i++ ) {
+                var hex = raw.charCodeAt( i ).toString( 16 );
+                result += ( hex.length === 2 ? hex : '0' + hex );
+            }
+            return result;
+        }
+        function encrypt( privkey, pubkey, text ) {
+            var key = nobleSecp256k1.getSharedSecret( privkey, '02' + pubkey, true ).substring( 2 );
+            var iv = window.crypto.getRandomValues(new Uint8Array(16));
+            var cipher = browserifyCipher.createCipheriv( 'aes-256-cbc', hexToBytes( key ), iv );
+            var encryptedMessage = cipher.update(text,"utf8","base64");
+            emsg = encryptedMessage + cipher.final( "base64" );
+            var uint8View = new Uint8Array( iv.buffer );
+            var decoder = new TextDecoder();
+            return emsg + "?iv=" + btoa( String.fromCharCode.apply( null, uint8View ) );
+        }
+        function decrypt( privkey, pubkey, ciphertext ) {
+            var [ emsg, iv ] = ciphertext.split( "?iv=" );
+            var key = nobleSecp256k1.getSharedSecret( privkey, '02' + pubkey, true ).substring( 2 );
+            var decipher = browserifyCipher.createDecipheriv(
+                'aes-256-cbc',
+                hexToBytes( key ),
+                hexToBytes( base64ToHex( iv ) )
+            );
+            var decryptedMessage = decipher.update( emsg, "base64" );
+            dmsg = decryptedMessage + decipher.final( "utf8" );
+            return dmsg;
+        }
+    </script>
+    <script>
+        function makeAnotherPlayer( element ) {
+            if ( element && document.getElementsByClassName( "player_pubkey" ).length < 4 ) {
+                element.previousElementSibling.style.display = "inline-block";
+            }
+            if ( document.getElementsByClassName( "player_pubkey" ).length < 4 ) {
+                if ( document.getElementById( "plus_button" ) ) {
+                    document.getElementById( "plus_button" ).remove();
+                }
+                var input = document.createElement( "input" );
+                input.type = "text";
+                input.className = "player_pubkey";
+                input.name = "player_pubkey";
+                input.style.width = "50%";
+                input.style.marginBottom = "20px";
+                document.getElementById( "player_pubkeys" ).append( input );
+                var minus = document.createElement( "div" );
+                minus.id = "minus_button";
+                minus.style = "display: none; border: 1px solid black; padding: 0px 5px; cursor: pointer; width: 20px; text-align: center;";
+                minus.innerText = "-";
+                minus.onclick = function() {this.previousElementSibling.remove();this.remove();}
+                document.getElementById( "player_pubkeys" ).append( minus );
+                var plus = document.createElement( "div" );
+                plus.id = "plus_button";
+                plus.style = "display: inline-block; border: 1px solid black; padding: 0px 5px; cursor: pointer; width: 20px; text-align: center;";
+                plus.innerText = "+";
+                plus.onclick = function() {makeAnotherPlayer( this );}
+                document.getElementById( "player_pubkeys" ).append( plus );
+            } else {
+                alert( "max number of players is 5 (the pubkeys here plus yours)" );
+            }
+        }
+    </script>
 </head>
 <body>
-    <p>Bet amount</p>
+    <p>Your public key</p>
+    <input type="text" id="nostr_pubkey" name="nostr_pubkey" disabled style="width: 50%;" />
+    <p>Bet amount (in sats)</p>
     <input type="number" id="bet_amount" name="bet_amount" min="540" value="540" step="1" />
     <p>Address where your winnings, if any, should go</p>
     <input type="text" id="winnings_address" name="winnings_address" />
-    <p>Number of players</p>
-    <input type="number" id="num_of_players" name="num_of_players" max="5" min="2" value="2" step="1" />
+    <p>Enter the pubkeys of the other players</p>
+    <div id="player_pubkeys"></div>
     <p>
         <button id="submitter" type="button">Submit</button>
     </p>
     <script>
-        document.getElementById( "submitter" ).addEventListener( "click", function() {
+        makeAnotherPlayer();
+        document.getElementById( "nostr_pubkey" ).value = nostr_pubKey;
+/*
+        var img = document.createElement( "img" );
+        img.style.transition = "opacity 1s";
+        img.className = "grey_horse";
+        img.src = "./dark-grey-horse.png";
+        img.addEventListener( "transitionstart", function() {
+            if ( img.style.opacity != "0.8" ) {
+                setTimeout( function() {img.style.opacity = "0.8";}, 1000 )
+            } else {
+                setTimeout( function() {img.style.opacity = "0.5";}, 1000 )
+            }
+        });
+        img.addEventListener( "transitionend", function() {
+            if ( img.style.opacity != "0.8" ) {
+                setTimeout( function() {img.style.opacity = "0.8";}, 1000 )
+            } else {
+                setTimeout( function() {img.style.opacity = "0.5";}, 1000 )
+            }
+        });
+        document.body.append( img );
+        if ( img.style.opacity != "0.5" ) {
+            setTimeout( function() {img.style.opacity = "0.5";}, 1000 );
+        } else {
+            setTimeout( function() {img.style.opacity = "0.8";}, 1000 );
+        }
+*/
+        document.getElementById( "submitter" ).addEventListener( "click", async function() {
+            document.getElementById( "player_pubkeys" ).style.display = "none";
+            document.getElementById( "player_pubkeys" ).previousElementSibling.style.display = "none";
+            document.getElementById( "submitter" ).remove();
+            var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                if ( ( !document.getElementsByClassName( "player_pubkey" )[ i ].value || document.getElementsByClassName( "player_pubkey" )[ i ].value == "" ) && !rosterIsFull() ) {
+                    console.log( "the roster is not full!" );
+                    alert( "No blank pubkeys" );
+                    return;
+                }
+            }
             var bet_amount = Number( document.getElementById( "bet_amount" ).value );
-            var num_of_players = Number( document.getElementById( "num_of_players" ).value );
+            var num_of_players = Number( document.getElementsByClassName( "player_pubkey" ).length ) + 1;
             var winnings_address = document.getElementById( "winnings_address" ).value;
             var deposit_minimum = ( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + bet_amount + 500;
             var keypair = bitcoinjs.ECPair.makeRandom();
@@ -1182,21 +1844,10 @@
             var p = document.createElement( "p" );
             p.innerText = deposit_address + " - precise deposit amount: " + deposit_minimum + " sats";
             document.body.append( p );
-            var title = document.createElement( "p" );
-            title.innerText = "Paste the transaction id of your deposit";
-            document.body.append( title );
-            var input = document.createElement( "input" );
-            input.type = "text";
-            input.id = "txid";
-            input.name = "txid";
-            document.body.append( input );
-            var submit_txid = document.createElement( "button" );
-            submit_txid.type = "button";
-            submit_txid.id = "submit_txid";
-            submit_txid.innerText = "Submit txid";
-            document.body.append( submit_txid );
-            document.getElementById( "submit_txid" ).addEventListener( "click", async function() {
-                var txid = document.getElementById( "txid" ).value;
+            alert( alert_text );
+            var moneyArrived = await waitForMoneyToArriveInAddress( deposit_address );
+            if ( moneyArrived ) {
+                var txid = await getIdOfTxThatSentMoneyToAddress( deposit_address );
                 var url = "https://mempool.space/testnet/api/tx/" + txid;
                 var tx = await getData( url );
                 var tx = JSON.parse( tx );
@@ -1232,34 +1883,27 @@
                 session[ "utxo" ][ "txindex" ] = txindex;
                 session[ "utxo" ][ "value" ] = tx[ "vout" ][ txindex ][ "value" ];
                 console.log( JSON.stringify( session ) );
+                var sendable = {}
+                sendable[ "msg_type" ] = "session data";
+                sendable[ "session" ] = session;
+                var player_pubkeys = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    player_pubkeys.push( document.getElementsByClassName( "player_pubkey" )[ i ].value );
+                }
+                player_pubkeys.forEach( function( pubkey, index ) {
+                    num_of_seconds = ( index + 1 ) * 1000;
+                    setTimeout( function() {sendDM( JSON.stringify( sendable ), pubkey );}, num_of_seconds );
+                });
                 console.log( "random number:", String( rand ) + ",", "preimage:", preimage, "preimage length:", String( preimage.length / 2 ) );
-                var instructions = document.createElement( "p" );
-                instructions.innerText = "Paste an array of one or more objects from your counterparty or counterparties in this format:";
-                document.body.append( instructions );
-                var pre = document.createElement( "pre" );
-                pre.id = "example";
-                pre.name = "example";
-                pre.innerText = 
-`[{
-    "pubkey": "023e7ed9b05826f5a3918755a7b1012aa19c0701345696f70e5998637de68f364a",
-    "numhash": "8cb74f633826472ec0709268506e5b9af9729ef1",
-    "winnings_address": "bcrt1q6kf9sl9kpqvvcck4hemlymm3qst8749jks36y8",
-    "utxo": {
-        "txid": "29316ec7b490892f6bd52ef62f30eca9f2ae35e75904bbf74e7f3f6ba2eecf40",
-        "txindex": 0,
-        "value": 25000
-    }
-}]`;
-                document.body.append( pre );
                 var textarea = document.createElement( "textarea" );
                 textarea.id = "counterparty";
                 textarea.name = "counterparty";
-                textarea.cols = "75";
-                textarea.rows = "10";
+                textarea.style.display = "none";
                 document.body.append( textarea );
                 var submit_counterparty = document.createElement( "button" );
                 submit_counterparty.type = "button";
                 submit_counterparty.id = "submit_counterparty";
+                submit_counterparty.style.display = "none";
                 submit_counterparty.innerText = "Submit counterparty info";
                 submit_counterparty.setAttribute( "data-session", JSON.stringify( session ) );
                 submit_counterparty.setAttribute( "data-bet_amount", String( bet_amount ) );
@@ -1270,8 +1914,12 @@
                 submit_counterparty.setAttribute( "data-deposit_minimum", deposit_minimum );
                 document.body.append( submit_counterparty );
                 document.getElementById( "submit_counterparty" ).addEventListener( "click", prepareLotteryAddress );
-            });
-            alert( alert_text );
+                var roster_is_full = await waitForFullRoster();
+                if ( roster_is_full ) {
+                    document.getElementById( "counterparty" ).value = sessionStorage[ "info_about_the_players" ];
+                    document.getElementById( "submit_counterparty" ).click();
+                }
+            }
         });
     </script>
 </body>
