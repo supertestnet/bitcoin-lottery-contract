@@ -5,11 +5,11 @@ This is a series of smart contracts that allow multiple parties to participate i
 
 # How can I play?
 
-Click here: https://supertestnet.github.io/bitcoin-lottery-contract/
+Click here: https://supertestnet.github.io/bitcoin-lottery-contract/ - play with test bitcoin
+
+Or here: https://supertestnet.github.io/bitcoin-lottery-contract/mainnet.html - play with real bitcoin
 
 Be aware that there is an *automatic* mode but currently it only half-works. It works if there are only 2 players and neither one tries to cheat. If you have more players than that, or if someone tries to cheat, you'll have to check your browser console and do some esoteric stuff in there, and there aren't really any good instructions. I'm working on it.
-
-Oh yeah and this script doesn't wait for confirmations yet so someone can cheat by double-spending their deposit if they lose. Be aware of that and don't use it on mainnet til that's fixed.
 
 # Random number generation
 
