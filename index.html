@@ -753,6 +753,7 @@
                     var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
                     console.log( "here is the winning transaction:", winning_tx );
                     pushBTCpmt( winning_tx );
+                    alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
                 }
                 if ( theirPreimageLength != myPreimageLength && mynum == 1 ) {
                     console.log( "I win!" );
@@ -760,6 +761,13 @@
                     var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
                     console.log( "here is the winning transaction:", winning_tx );
                     pushBTCpmt( winning_tx );
+                    alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
+                }
+                if ( theirPreimageLength != myPreimageLength && mynum == 0 ) {
+                    alert( "you lost! Consider trying again." );
+                }
+                if ( theirPreimageLength == myPreimageLength && mynum == 1 ) {
+                    alert( "you lost! Consider trying again." );
                 }
             }
         }
