@@ -673,7 +673,8 @@
                 var tx = await getData( url );
                 var tx = JSON.parse( tx );
                 if ( tx[ "vout" ][ txindex ][ "value" ] < deposit_minimum ) {
-                    alert( "One of your counterparties did not deposit enough money into their deposit address. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                    alert( "One of your counterparties did not deposit enough money into their deposit address. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                     window.location.reload();
                     return;
                 }
@@ -729,45 +730,50 @@
             console.log( fully_signed_psft_tx );
             pushBTCpmt( fully_signed_psft_tx );
             var collateral_withdrawal_tx = withdrawFromCollateralAddress( funding_txid, mynum, winnings_address, bet_amount, array_of_pubkeys, privkey, preimage );
-            console.log( "after you broadcast the funding tx it is also time to broadcast the collateral withdrawal tx:" );
+            console.log( "after you broadcast the funding tx, decide whether to wait for it to confirm (recommended) or trust your counterparties not to doublespend its inputs (not recommended). If you decide not to wait, is also time to broadcast the collateral withdrawal tx:" );
             console.log( collateral_withdrawal_tx );
-            setTimeout( function() {pushBTCpmt( collateral_withdrawal_tx );}, 3000 );
-            console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
-            //todo: this part needs work -- it assumes only two players are playing
-            var other_address = "";
-            var other_hash = "";
-            players.forEach( function( player, index ) {
-                if ( index != mynum ) {
-                    other_address = player[ "collateral_address" ];
-                    other_hash = player[ "numhash" ];
-                }
-            });
-            var moneyWasSpent = await waitForMoneyToLeaveAddress( other_address );
-            if ( moneyWasSpent ) {
-                var other_preimage = await preimageLooper( other_address, other_hash );
-                var theirPreimageLength = other_preimage.length / 2;
-                var myPreimageLength = preimage.length / 2;
-                if ( theirPreimageLength == myPreimageLength && mynum == 0 ) {
-                    console.log( "I win!" );
-                    var array_of_preimages = [ preimage, other_preimage ];
-                    var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
-                    console.log( "here is the winning transaction:", winning_tx );
-                    pushBTCpmt( winning_tx );
-                    alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
-                }
-                if ( theirPreimageLength != myPreimageLength && mynum == 1 ) {
-                    console.log( "I win!" );
-                    var array_of_preimages = [ other_preimage, preimage ];
-                    var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
-                    console.log( "here is the winning transaction:", winning_tx );
-                    pushBTCpmt( winning_tx );
-                    alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
-                }
-                if ( theirPreimageLength != myPreimageLength && mynum == 0 ) {
-                    alert( "you lost! Consider trying again." );
-                }
-                if ( theirPreimageLength == myPreimageLength && mynum == 1 ) {
-                    alert( "you lost! Consider trying again." );
+            var i_should_wait_to_withdraw_my_collateral = confirm( "The lottery funding transaction was broadcasted but your counterparties can doublespend its inputs because it hasn't confirmed yet. If you want to wait for it confirm (recommended), click OK. If you trust your counterparty or counterparties and you all agree to go the trusted fast-route where you don't wait for the funding transaction to confirm, click cancel (not recommended." );
+            if ( !i_should_wait_to_withdraw_my_collateral ) {
+                pushBTCpmt( collateral_withdrawal_tx );
+                console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
+                //todo: this part needs work -- it assumes only two players are playing
+                if ( players.length == 2 ) {
+                    var other_address = "";
+                    var other_hash = "";
+                    players.forEach( function( player, index ) {
+                        if ( index != mynum ) {
+                            other_address = player[ "collateral_address" ];
+                            other_hash = player[ "numhash" ];
+                        }
+                    });
+                    var moneyWasSpent = await waitForMoneyToLeaveAddress( other_address );
+                    if ( moneyWasSpent ) {
+                        var other_preimage = await preimageLooper( other_address, other_hash );
+                        var theirPreimageLength = other_preimage.length / 2;
+                        var myPreimageLength = preimage.length / 2;
+                        if ( theirPreimageLength == myPreimageLength && mynum == 0 ) {
+                            console.log( "I win!" );
+                            var array_of_preimages = [ preimage, other_preimage ];
+                            var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
+                            console.log( "here is the winning transaction:", winning_tx );
+                            pushBTCpmt( winning_tx );
+                            alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
+                        }
+                        if ( theirPreimageLength != myPreimageLength && mynum == 1 ) {
+                            console.log( "I win!" );
+                            var array_of_preimages = [ other_preimage, preimage ];
+                            var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
+                            console.log( "here is the winning transaction:", winning_tx );
+                            pushBTCpmt( winning_tx );
+                            alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
+                        }
+                        if ( theirPreimageLength != myPreimageLength && mynum == 0 ) {
+                            alert( "you lost! Consider trying again." );
+                        }
+                        if ( theirPreimageLength == myPreimageLength && mynum == 1 ) {
+                            alert( "you lost! Consider trying again." );
+                        }
+                    }
                 }
             }
         }
@@ -833,7 +839,8 @@
                     var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
                     all_pubkeys.forEach( function( key ) {
                         if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
-                            alert( "One or more of your counterparties tried to make you believe a transaction was signed by everyone when it actually wasn't. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                            pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                            alert( "One or more of your counterparties tried to make you believe a transaction was signed by everyone when it actually wasn't. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                             window.location.reload();
                             return;
                         } else {
@@ -849,7 +856,8 @@
                         i_should_continue = true;
                     }
                     if ( !i_should_continue ) {
-                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     }
@@ -874,7 +882,8 @@
                     var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
                     pubkeys_below_me.forEach( function( key ) {
                         if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
-                            alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                            pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                            alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                             window.location.reload();
                             return;
                         } else {
@@ -890,7 +899,8 @@
                         i_should_continue = true;
                     }
                     if ( !i_should_continue ) {
-                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     }
@@ -915,7 +925,8 @@
                     var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
                     all_pubkeys.forEach( function( key ) {
                         if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
-                            alert( "One or more of your counterparties tried to make you believe a transaction was signed by everyone when it actually wasn't. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                            pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                            alert( "One or more of your counterparties tried to make you believe a transaction was signed by everyone when it actually wasn't. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                             window.location.reload();
                             return;
                         } else {
@@ -931,7 +942,8 @@
                         i_should_continue = true;
                     }
                     if ( !i_should_continue ) {
-                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     }
@@ -982,7 +994,8 @@
                 var psbt = bitcoinjs.Psbt.fromHex( fully_signed_pslt );
                 all_pubkeys.forEach( function( key ) {
                     if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
-                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     } else {
@@ -998,7 +1011,8 @@
                     i_should_continue = true;
                 }
                 if ( !i_should_continue ) {
-                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                     window.location.reload();
                     return;
                 }
@@ -1020,7 +1034,8 @@
                 var psbt = bitcoinjs.Psbt.fromHex( pslt );
                 pubkeys_below_me.forEach( function( key ) {
                     if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
-                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     } else {
@@ -1036,7 +1051,8 @@
                     i_should_continue = true;
                 }
                 if ( !i_should_continue ) {
-                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                     window.location.reload();
                     return;
                 }
@@ -1059,7 +1075,8 @@
                 var psbt = bitcoinjs.Psbt.fromHex( fully_signed_pslt );
                 all_pubkeys.forEach( function( key ) {
                     if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
-                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     } else {
@@ -1075,7 +1092,8 @@
                     i_should_continue = true;
                 }
                 if ( !i_should_continue ) {
-                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                     window.location.reload();
                     return;
                 }
@@ -1121,7 +1139,8 @@
                 var decoded_psbt = bitcoinjs.Psbt.fromHex( fully_signed_psbt );
                 all_pubkeys.forEach( function( key, index ) {
                     if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
-                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     } else {
@@ -1137,7 +1156,8 @@
                     i_should_continue = true;
                 }
                 if ( !i_should_continue ) {
-                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                     window.location.reload();
                     return;
                 }
@@ -1159,7 +1179,8 @@
                 var decoded_psbt = bitcoinjs.Psbt.fromHex( psbt );
                 pubkeys_below_me.forEach( function( key, index ) {
                     if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
-                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     } else {
@@ -1175,7 +1196,8 @@
                     i_should_continue = true;
                 }
                 if ( !i_should_continue ) {
-                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                     window.location.reload();
                     return;
                 }
@@ -1196,7 +1218,8 @@
                 var decoded_psbt = bitcoinjs.Psbt.fromHex( fully_signed_psbt );
                 all_pubkeys.forEach( function( key, index ) {
                     if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
-                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                         window.location.reload();
                         return;
                     } else {
@@ -1212,7 +1235,8 @@
                     i_should_continue = true;
                 }
                 if ( !i_should_continue ) {
-                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                    alert( "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for safety, you should see them in your wallet soon." );
                     window.location.reload();
                     return;
                 }
@@ -1293,26 +1317,23 @@
           var num = num.toString() + "000";
           num = Number( num );
           return new Promise( function( resolve, reject ) {
-            setTimeout( function() { resolve( "I am waiting ten seconds because sometimes esplora updates intermittently where it knows a txid is associated with an address but does not have the info for that txid yet" ); }, num );
+            setTimeout( function() { resolve( "" ); }, num );
           });
         }
 
         function takeTxsAndGetPreimageFromThem( txs, hash ) {
             return new Promise( async function( resolve, reject ) {
                 if ( txs.length > 1 ) {
-                    console.log( "here comes the ten second timeout" );
+                    console.log( "here comes the ten second timeout -- I wait ten seconds because sometimes esplora knows a txid is associated with an address (so that check returns true) but it has not parsed and stored all the info for that txid yet, so I need to give it a bit of time to do that" );
                     var timeout = await waitSomeSeconds( 10 );
                     console.log( "ok the ten second timeout is done, let's continue" );
                     txs.forEach( async function( tx ) {
                         console.log( tx );
                         var possible_preimage = await getPreimageFromTransactionThatSpendsAnHTLC( tx, hash );
-                        console.log( "here is the possible preimage I got (remember that it might be blank):", possible_preimage );
-                        console.log( "if it is blank I will ignore it" );
-                        if ( possible_preimage ) {
-                            if ( possible_preimage.length > 31 ) {
-                                console.log( "it was the right size so I will now return it (by the way, this is it:", possible_preimage );
-                                resolve( possible_preimage );
-                            }
+                        if ( possible_preimage && possible_preimage != "" && possible_preimage.length > 1 ) {
+                            var preimage = possible_preimage
+                            console.log( "this is the preimage I got:", preimage );
+                            resolve( preimage );
                         }
                     });
                 } else {
@@ -1325,10 +1346,11 @@
             return new Promise( async function( resolve, reject ) {
                 var txs = await getTransactionsInvolvingAddress( address );
                 var txs = JSON.parse( txs );
+                txs.reverse();
                 var preimage = "";
                 console.log( "Ok I am trying to get the preimage for this hash:", hash );
-                console.log( "here are the transactions I can search for it in (remember that it might be blank, in which case I will just rerun in a bit):" );
-                preimage += await takeTxsAndGetPreimageFromThem( txs, hash )
+                console.log( "I will search for it in all transactions associated with the address provided, and if that set is currently empty (or if I don't get what I want), I will just rerun this script again in a bit -- that's what preimageLooper does" );
+                preimage += await takeTxsAndGetPreimageFromThem( txs, hash );
                 console.log( "the preimage I will return is", preimage );
                 resolve( preimage );
             });
@@ -1459,7 +1481,7 @@
             return new Promise( function( resolve, reject ) {
                 var xhttp = new XMLHttpRequest();
                 xhttp.onreadystatechange = function() {
-                    if ( this.readyState == 4 && this.status == 200 ) {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
                         var json = JSON.parse( xhttp.responseText );
                         if ( json[ "chain_stats" ][ "spent_txo_count" ] > 0 || json[ "mempool_stats" ][ "spent_txo_count" ] > 0 ) {
                             resolve( true );
@@ -1497,7 +1519,7 @@
             return new Promise( function( resolve, reject ) {
                 var xhttp = new XMLHttpRequest();
                 xhttp.onreadystatechange = function() {
-                    if (this.readyState == 4 && this.status == 200) {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
                         var json = JSON.parse( xhttp.responseText );
                         var i; for ( i=0; i<json[ "vin" ].length; i++ ) {
                             var j; for ( j=0; j<json[ "vin" ][ i ][ "witness" ].length; j++ ) {
@@ -1509,7 +1531,7 @@
                         resolve( "" );
                     }
                 };
-                xhttp.open("GET", "https://blockstream.info/api/tx/" + txid, true);
+                xhttp.open("GET", "https://mempool.space/api/tx/" + txid, true);
                 xhttp.send();
             });
         }
@@ -1557,6 +1579,18 @@
     <script>
         function takeNextSteps( message, player_pubkey ) {
             var message = JSON.parse( message );
+            if ( message[ "msg_type" ] == "chat" ) {
+                console.log( "message from " + player_pubkey + ": " + message[ "content" ] );
+                /*
+                usage:
+                var message = {}
+                message[ "msg_type" ] = "chat";
+                message[ "content" ] = "test123";
+                message = JSON.stringify( message );
+                var recipient = <pubkey>;
+                sendDM( message, recipient );
+                */
+            }
             if ( message[ "msg_type" ] == "session data" ) {
                 var it_was_a_duplicate = false;
                 sessionStorage[ "num_of_players" ] = message[ "session" ][ "num_of_players" ];
@@ -1641,31 +1675,21 @@
         }
     </script>
     <script>
-        var { getSharedSecret, schnorr, utils } = nobleSecp256k1
-        var crypto  = window.crypto 
-        var getRand = size => crypto.getRandomValues(new Uint8Array(size))
-        var sha256  = bitcoinjs.crypto.sha256
-        var nostr_keypair = bitcoinjs.ECPair.makeRandom()
-        var nostr_privKey = nostr_keypair.privateKey.toString( "hex" )
-        var nostr_pubKey  = nostr_keypair.publicKey.toString( "hex" )
-        nostr_pubKey      = nostr_pubKey.substring( 2 )
-        console.log( "nostr_pubKey:", nostr_pubKey );
-        var relay = "wss://relay.damus.io";
-        var socket = new WebSocket( relay );
-        socket.addEventListener('message', async function( message ) {
+        async function handleMessage( message ) {
+            console.log( message );
             var [ type, subId, event ] = JSON.parse( message.data );
             var { kind, content } = event || {}
             if (!event) return
             var sig_is_valid = await nobleSecp256k1.schnorr.verify( event.sig, event.id, event.pubkey );
             if (!sig_is_valid) return
-            if (kind === 4) {
+            if (kind === 20004) {
                 content = decrypt(nostr_privKey, event.pubkey, content)
+                takeNextSteps( content, event.pubkey );
             }
-            takeNextSteps( content, event.pubkey );
-        });
-        var subId   = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" )
-        var filter  = { "#p": [ nostr_pubKey ] }
-        socket.addEventListener('open', async function( e ) {
+        }
+    </script>
+    <script>
+        async function openConnection( e ) {
             console.log( "connected to " + relay );
             var subscription = [ "REQ", subId, filter ];
             socket.send( JSON.stringify( subscription ) );
@@ -1681,14 +1705,57 @@
             console.log('signedEvent:', signedEvent)
             socket.send(JSON.stringify([ "EVENT", signedEvent ]))
 */
-        })
+        }
+    </script>
+    <script>
+        function checkHeartbeat() {
+            heartbeat = false;
+            var heartbeatsubId   = "00000002" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 8 )
+            var heartbeatfilter  = { "ids": [ "41ce9bc50da77dda5542f020370ecc2b056d8f2be93c1cedf1bf57efcab095b0" ] }
+            var heartbeatsub     = [ "REQ", heartbeatsubId, heartbeatfilter ];
+            if ( socket && socket.readyState != 0 ) {
+                socket.send( JSON.stringify( heartbeatsub ) );
+            }
+            setTimeout( function() {
+                var closer = [ "CLOSE", heartbeatsubId ];
+                if ( socket && socket.readyState != 0 ) {
+                    socket.send( JSON.stringify( closer ) );
+                }
+            }, 1500 );
+            setTimeout( function() {
+                if ( !heartbeat && socket.readyState == 3 ) {
+                    socket.removeEventListener( 'open', openConnection );
+                    socket.removeEventListener( 'message', handleMessage );
+                    socket = new WebSocket( relay );
+                    socket.addEventListener( 'open', openConnection );
+                    socket.addEventListener( 'message', handleMessage );
+                }
+            }, 2000 );
+        }
+    </script>
+    <script>
+        var { getSharedSecret, schnorr, utils } = nobleSecp256k1
+        var crypto  = window.crypto 
+        var getRand = size => crypto.getRandomValues(new Uint8Array(size))
+        var sha256  = bitcoinjs.crypto.sha256
+        var nostr_keypair = bitcoinjs.ECPair.makeRandom()
+        var nostr_privKey = nostr_keypair.privateKey.toString( "hex" )
+        var nostr_pubKey  = nostr_keypair.publicKey.toString( "hex" )
+        nostr_pubKey      = nostr_pubKey.substring( 2 )
+        console.log( "nostr_pubKey:", nostr_pubKey );
+        var relay = "wss://relay.damus.io";
+        var socket = new WebSocket( relay );
+        socket.addEventListener('message', handleMessage );
+        var subId   = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" )
+        var filter  = { "#p": [ nostr_pubKey ] }
+        socket.addEventListener('open', openConnection );
 
         async function sendDM( message, recipient ) {
             var encrypted_message = encrypt( nostr_privKey, recipient, message )
             var encrypted_event = {
                 "content"    : encrypted_message,
                 "created_at" : Math.floor( Date.now() / 1000 ),
-                "kind"       : 4,
+                "kind"       : 20004,
                 "tags"       : [ [ 'p', recipient ] ],
                 "pubkey"     : nostr_pubKey,
             }
@@ -1837,6 +1904,9 @@
             var bet_amount = Number( document.getElementById( "bet_amount" ).value );
             var num_of_players = Number( document.getElementsByClassName( "player_pubkey" ).length ) + 1;
             var winnings_address = document.getElementById( "winnings_address" ).value;
+            if ( !winnings_address || winnings_address == "" ) {
+                winnings_address = prompt( "Looks like you forgot to put in a bitcoin address where your winnings should go if you win. Please paste one here." );
+            }
             var deposit_minimum = ( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + bet_amount + 500;
             var keypair = bitcoinjs.ECPair.makeRandom();
             var privkey = keypair.privateKey.toString( "hex" );
@@ -1929,6 +1999,13 @@
                 }
             }
         });
+    </script>
+    <script>
+        function doBackgroundTasks() {
+            checkHeartbeat();
+            setTimeout( function() {doBackgroundTasks();}, 10000 );
+        }
+        doBackgroundTasks();
     </script>
 </body>
 </html>
