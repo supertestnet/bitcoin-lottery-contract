@@ -732,47 +732,50 @@
             var collateral_withdrawal_tx = withdrawFromCollateralAddress( funding_txid, mynum, winnings_address, bet_amount, array_of_pubkeys, privkey, preimage );
             console.log( "after you broadcast the funding tx, decide whether to wait for it to confirm (recommended) or trust your counterparties not to doublespend its inputs (not recommended). If you decide not to wait, is also time to broadcast the collateral withdrawal tx:" );
             console.log( collateral_withdrawal_tx );
-            var i_should_wait_to_withdraw_my_collateral = confirm( "The lottery funding transaction was broadcasted but your counterparties can doublespend its inputs because it hasn't confirmed yet. If you want to wait for it confirm (recommended), click OK. If you trust your counterparty or counterparties and you all agree to go the trusted fast-route where you don't wait for the funding transaction to confirm, click cancel (not recommended." );
-            if ( !i_should_wait_to_withdraw_my_collateral ) {
-                pushBTCpmt( collateral_withdrawal_tx );
-                console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
-                //todo: this part needs work -- it assumes only two players are playing
-                if ( players.length == 2 ) {
-                    var other_address = "";
-                    var other_hash = "";
-                    players.forEach( function( player, index ) {
-                        if ( index != mynum ) {
-                            other_address = player[ "collateral_address" ];
-                            other_hash = player[ "numhash" ];
-                        }
-                    });
-                    var moneyWasSpent = await waitForMoneyToLeaveAddress( other_address );
-                    if ( moneyWasSpent ) {
-                        var other_preimage = await preimageLooper( other_address, other_hash );
-                        var theirPreimageLength = other_preimage.length / 2;
-                        var myPreimageLength = preimage.length / 2;
-                        if ( theirPreimageLength == myPreimageLength && mynum == 0 ) {
-                            console.log( "I win!" );
-                            var array_of_preimages = [ preimage, other_preimage ];
-                            var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
-                            console.log( "here is the winning transaction:", winning_tx );
-                            pushBTCpmt( winning_tx );
-                            alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
-                        }
-                        if ( theirPreimageLength != myPreimageLength && mynum == 1 ) {
-                            console.log( "I win!" );
-                            var array_of_preimages = [ other_preimage, preimage ];
-                            var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
-                            console.log( "here is the winning transaction:", winning_tx );
-                            pushBTCpmt( winning_tx );
-                            alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
-                        }
-                        if ( theirPreimageLength != myPreimageLength && mynum == 0 ) {
-                            alert( "you lost! Consider trying again." );
-                        }
-                        if ( theirPreimageLength == myPreimageLength && mynum == 1 ) {
-                            alert( "you lost! Consider trying again." );
-                        }
+            var i_should_wait_to_withdraw_my_collateral = confirm( "The lottery funding transaction was broadcasted but one or more of your counterparties can doublespend its inputs because it isn't in a block yet. If you want to wait for it confirm (recommended), click OK. If you trust your counterparty or counterparties and you all agree to go the trusted fast-route where you don't wait for the funding transaction to confirm, click cancel (not recommended)." );
+            if ( i_should_wait_to_withdraw_my_collateral ) {
+                console.log( "waiting for the funding tx to get confirmed. Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
+                var txIsSufficientlyConfirmed = await waitForConfs( getIdFromPSBT( fully_signed_psft ), 1 );
+                console.log( "yay, the funding tx got confirmed! Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
+            }
+            pushBTCpmt( collateral_withdrawal_tx );
+            console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
+            //todo: this part needs work -- it assumes only two players are playing
+            if ( players.length == 2 ) {
+                var other_address = "";
+                var other_hash = "";
+                players.forEach( function( player, index ) {
+                    if ( index != mynum ) {
+                        other_address = player[ "collateral_address" ];
+                        other_hash = player[ "numhash" ];
+                    }
+                });
+                var moneyWasSpent = await waitForMoneyToLeaveAddress( other_address );
+                if ( moneyWasSpent ) {
+                    var other_preimage = await preimageLooper( other_address, other_hash );
+                    var theirPreimageLength = other_preimage.length / 2;
+                    var myPreimageLength = preimage.length / 2;
+                    if ( theirPreimageLength == myPreimageLength && mynum == 0 ) {
+                        console.log( "I win!" );
+                        var array_of_preimages = [ preimage, other_preimage ];
+                        var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
+                        console.log( "here is the winning transaction:", winning_tx );
+                        pushBTCpmt( winning_tx );
+                        alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
+                    }
+                    if ( theirPreimageLength != myPreimageLength && mynum == 1 ) {
+                        console.log( "I win!" );
+                        var array_of_preimages = [ other_preimage, preimage ];
+                        var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
+                        console.log( "here is the winning transaction:", winning_tx );
+                        pushBTCpmt( winning_tx );
+                        alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
+                    }
+                    if ( theirPreimageLength != myPreimageLength && mynum == 0 ) {
+                        alert( "you lost! Consider trying again." );
+                    }
+                    if ( theirPreimageLength == myPreimageLength && mynum == 1 ) {
+                        alert( "you lost! Consider trying again." );
                     }
                 }
             }
@@ -1535,6 +1538,20 @@
                 xhttp.send();
             });
         }
+        //this function waits until a txid has a certain number of confirmations and then returns true -- it never returns false but it can hang forever
+        async function waitForConfs( txid, blocks_to_wait ) {
+            var numOfConfs = await howManyConfs( txid );
+            return new Promise( function( resolve, reject ) {
+                if ( numOfConfs < blocks_to_wait ) {
+                    setTimeout( async function() {
+                        var msg = await waitForConfs( txid, blocks_to_wait );
+                        resolve( msg );
+                    }, 5000 );
+                } else {
+                    resolve( true );
+                }
+            });
+        }
     </script>
     <script>
         //this function waits until a roster of players is full, checking every five seconds, and then returns true -- it never returns false but it can hang forever
@@ -1676,7 +1693,6 @@
     </script>
     <script>
         async function handleMessage( message ) {
-            console.log( message );
             var [ type, subId, event ] = JSON.parse( message.data );
             var { kind, content } = event || {}
             if (!event) return
