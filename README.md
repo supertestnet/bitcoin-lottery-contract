@@ -35,7 +35,7 @@ Yeah, one of the things I needed to do was make sure everyone in the game sends 
 
 Yep.
 
-# SERIOUSLY??!?
+# ARE YOU NUTS??!?
 
 Yes.
 
