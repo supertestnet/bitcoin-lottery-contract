@@ -9,7 +9,7 @@ Click here: https://supertestnet.github.io/bitcoin-lottery-contract/ - play with
 
 Or here: https://supertestnet.github.io/bitcoin-lottery-contract/mainnet.html - play with real bitcoin
 
-Be aware that there is an *automatic* mode but currently it only half-works. It works if there are only 2 players and neither one tries to cheat. If you have more players than that, or if someone tries to cheat, you'll have to check your browser console and do some esoteric stuff in there, and there aren't really any good instructions. I'm working on it.
+Be aware that there is an *automatic* mode but currently it only half-works. It works if no one tries to cheat. If someone tries to cheat, you'll have to check your browser console and do some esoteric stuff in there, and there aren't really any good instructions. I'm working on it.
 
 # Random number generation
 
