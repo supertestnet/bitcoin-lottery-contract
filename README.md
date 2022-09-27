@@ -44,7 +44,6 @@ The short answer is: I alphabetize the players' pubkeys and choose the "highest"
 # TODO
 
 - Change all the transactions to use a reasonable fee, not a hard coded 500 sats
-- Display a progress bar with indications about what the app is doing
 - Detect possible cheating attempts in advance by noticing unexpected delays and indicate for users what will happen next (e.g. when they will be guaranteed to get their money back)
 - Show users an abort button up that only goes away when the funding transaction is broadcasted
 - Support bech32 encoding for nostr pubkeys
