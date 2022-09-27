@@ -718,12 +718,14 @@
             });
             console.log( "fully signed collateral withdrawal transactions:" );
             console.log( JSON.stringify( fully_signed_collateral_withdrawal_transactions ) );
+            sessionStorage[ "fully_signed_collateral_withdrawal_transactions" ] = JSON.stringify( fully_signed_collateral_withdrawal_transactions );
             var fully_signed_lottery_withdrawal_transaction = await cosignLotteryTransaction( funding_txid, players.length, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses_for_lottery_address, privkey, players, mynum );
             console.log( "fully signed pslt:" );
             console.log( fully_signed_lottery_withdrawal_transaction );
             var fully_signed_pslt_tx = withdrawFromLotteryAddressAsLastSigner( fully_signed_lottery_withdrawal_transaction, array_of_pubkeys );
             console.log( "fully signed pslt tx:" );
             console.log( fully_signed_pslt_tx );
+            sessionStorage[ "fully_signed_pslt_tx" ] = fully_signed_pslt_tx;
             console.log( "time to fund the transaction! You've got all the signed things" );
             var fully_signed_psft = await cosignPSBT( funding_psbt, privkey, mynum, players );
             console.log( "fully signed psft:" );
@@ -732,6 +734,7 @@
             console.log( "fully signed funding tx:" );
             console.log( fully_signed_psft_tx );
             pushBTCpmt( fully_signed_psft_tx );
+            setTimeout( function() {punishCheaters( fully_signed_psft );}, 3000 );
             var collateral_withdrawal_tx = withdrawFromCollateralAddress( funding_txid, mynum, winnings_address, bet_amount, array_of_pubkeys, privkey, preimage );
             console.log( "after you broadcast the funding tx, decide whether to wait for it to confirm (recommended) or trust your counterparties not to doublespend its inputs (not recommended). If you decide not to wait, is also time to broadcast the collateral withdrawal tx:" );
             console.log( collateral_withdrawal_tx );
@@ -812,7 +815,18 @@
                 }
                 sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
             }
-            //todo: check if 8 blocks went by without the money leaving the address. If they did, broadcast the collateral address for the player whose collateral address that is. Then wait another eight blocks and broadcast the lottery withdrawal transaction.
+        }
+    </script>
+    <script>
+        async function punishCheaters( psft ) {
+            var timeToPunishHasArrived = await waitForConfs( getIdFromPSBT( psft ), 8 );
+            var fully_signed_collateral_withdrawal_transactions = JSON.parse( sessionStorage[ "fully_signed_collateral_withdrawal_transactions" ] );
+            fully_signed_collateral_withdrawal_transactions.forEach( function( tx, index ) {
+                num_of_seconds = ( index + 1 ) * 3000;
+                setTimeout( function() {pushBTCpmt( tx );}, num_of_seconds );
+            });
+            var timeForReimbursementHasArrived = await waitForConfs( getIdFromPSBT( psft ), 16 );
+            pushBTCpmt( sessionStorage[ "fully_signed_pslt_tx" ] );
         }
     </script>
     <script>
