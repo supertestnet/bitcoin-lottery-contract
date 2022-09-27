@@ -29,7 +29,7 @@ Through hashed timelocked contracts. Before the game, the players each create a 
 
 Yeah, one of the things I needed to do was make sure everyone in the game sends their money into the lottery address and the collateral addresses at the same time. The only way I know how to do that is with a coinjoin, so I wrote some coinjoin software to enable that. It's included in the index.html file.
 
-# Wait there's a coinjoin in javascript??
+# Wait you made a coinjoin implementation in javascript??
 
 Yep.
 
