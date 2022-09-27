@@ -681,6 +681,7 @@
             });
             var pubkeys = [];
             var array_of_hashes_and_pubkeys = [];
+            var array_of_hashes = [];
             var array_of_addresses = [];
             players.forEach( function( player ) {
                 pubkeys.push( player[ "pubkey" ] );
@@ -688,9 +689,11 @@
                 array.push( player[ "numhash" ], player[ "pubkey" ] );
                 array_of_hashes_and_pubkeys.push( array );
                 array_of_addresses.push( player[ "winnings_address" ] );
+                array_of_hashes.push( player[ "numhash" ] );
             });
             players.forEach( function( player, index ) {
                 player[ "collateral_address" ] = collateral( player[ "numhash" ], pubkeys, index );
+                listenForCollateralDeposit( player[ "collateral_address" ], player[ "numhash" ], preimage, players );
             });
             var array_of_pubkeys = pubkeys;
             var array_of_addresses_for_lottery_address = btoa( JSON.stringify( array_of_addresses ) );
@@ -740,45 +743,24 @@
             }
             pushBTCpmt( collateral_withdrawal_tx );
             console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
-            //todo: this part needs work -- it assumes only two players are playing
-            if ( players.length == 2 ) {
-                var other_address = "";
-                var other_hash = "";
-                players.forEach( function( player, index ) {
-                    if ( index != mynum ) {
-                        other_address = player[ "collateral_address" ];
-                        other_hash = player[ "numhash" ];
-                    }
-                });
-                var moneyWasSpent = await waitForMoneyToLeaveAddress( other_address );
-                if ( moneyWasSpent ) {
-                    var other_preimage = await preimageLooper( other_address, other_hash );
-                    var theirPreimageLength = other_preimage.length / 2;
-                    var myPreimageLength = preimage.length / 2;
-                    if ( theirPreimageLength == myPreimageLength && mynum == 0 ) {
-                        console.log( "I win!" );
-                        var array_of_preimages = [ preimage, other_preimage ];
-                        var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
-                        console.log( "here is the winning transaction:", winning_tx );
-                        pushBTCpmt( winning_tx );
-                        alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
-                    }
-                    if ( theirPreimageLength != myPreimageLength && mynum == 1 ) {
-                        console.log( "I win!" );
-                        var array_of_preimages = [ other_preimage, preimage ];
-                        var winning_tx = withdrawFromLotteryAddress( funding_txid, players.length, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, array_of_preimages );
-                        console.log( "here is the winning transaction:", winning_tx );
-                        pushBTCpmt( winning_tx );
-                        alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
-                    }
-                    if ( theirPreimageLength != myPreimageLength && mynum == 0 ) {
-                        alert( "you lost! Consider trying again." );
-                    }
-                    if ( theirPreimageLength == myPreimageLength && mynum == 1 ) {
-                        alert( "you lost! Consider trying again." );
-                    }
+            var other_addresses = [];
+            var other_hashes = [];
+            players.forEach( function( player, index ) {
+                if ( index != mynum ) {
+                    other_addresses.push( player[ "collateral_address" ] );
+                    other_hashes.push( player[ "numhash" ] );
                 }
-            }
+            });
+            var info_for_withdrawing_from_lottery_address_as_winner = {}
+            info_for_withdrawing_from_lottery_address_as_winner[ "funding_txid" ] = funding_txid;
+            info_for_withdrawing_from_lottery_address_as_winner[ "num_of_players" ] = players.length;
+            info_for_withdrawing_from_lottery_address_as_winner[ "bet_amount" ] = bet_amount;
+            info_for_withdrawing_from_lottery_address_as_winner[ "winnings_address" ] = winnings_address;
+            info_for_withdrawing_from_lottery_address_as_winner[ "array_of_hashes_and_pubkeys" ] = array_of_hashes_and_pubkeys;
+            info_for_withdrawing_from_lottery_address_as_winner[ "privkey" ] = privkey;
+            info_for_withdrawing_from_lottery_address_as_winner = JSON.stringify( info_for_withdrawing_from_lottery_address_as_winner );
+            info_for_withdrawing_from_lottery_address_as_winner = btoa( info_for_withdrawing_from_lottery_address_as_winner );
+            var rosterOfPreimagesIsFull = await waitForFullRosterOfPreimages( preimage, array_of_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
         }
     </script>
     <script>
@@ -808,6 +790,29 @@
           }
           var returnable = await getTimeoutData();
           return returnable;
+        }
+    </script>
+    <script>
+        async function listenForCollateralDeposit( address, hash, mypreimage, players ) {
+            var moneyArrived = await waitForMoneyToArriveInAddress( address );
+            if ( !moneyArrived ) return;
+            var moneyWasSpent = await waitForMoneyToLeaveAddress( address );
+            var preimage = await preimageLooper( address, hash );
+            if ( !sessionStorage[ "roster_of_preimages" ] || sessionStorage[ "roster_of_preimages" ] == "" ) {
+                var roster_of_preimages = [];
+                roster_of_preimages.push( mypreimage );
+                if ( !roster_of_preimages.includes( preimage ) ) {
+                    roster_of_preimages.push( preimage );
+                }
+                sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
+            } else {
+                var roster_of_preimages = JSON.parse( sessionStorage[ "roster_of_preimages" ] );
+                if ( !roster_of_preimages.includes( preimage ) ) {
+                    roster_of_preimages.push( preimage );
+                }
+                sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
+            }
+            //todo: check if 8 blocks went by without the money leaving the address. If they did, broadcast the collateral address for the player whose collateral address that is. Then wait another eight blocks and broadcast the lottery withdrawal transaction.
         }
     </script>
     <script>
@@ -1578,6 +1583,81 @@
         }
     </script>
     <script>
+        //this function waits until a roster of players is full, checking every five seconds, and then returns true -- it never returns false but it can hang forever
+        async function waitForFullRosterOfPreimages( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner ) {
+            async function isRosterOfPreimagesFullYet( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner ) {
+                var roster_of_preimages_is_full = await rosterOfPreimagesIsFull( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+                return new Promise( function( resolve, reject ) {
+                    if ( !roster_of_preimages_is_full ) {
+                        setTimeout( async function() {
+                            var msg = await isRosterOfPreimagesFullYet( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+                            resolve( msg );
+                        }, 5000 );
+                    } else {
+                        var ordered_preimages = [];
+                        var proper_order = [];
+                        var unordered_preimages = JSON.parse( sessionStorage[ "roster_of_preimages" ] );
+                        ordered_hashes.forEach( function( hash, index ) {
+                            console.log( "hash I'm working on:", hash );
+                            unordered_preimages.forEach( function( preimage, index2 ) {
+                                console.log( "preimage I'm checking to see if it hashes to that hash:", preimage );
+                                if ( bitcoinjs.crypto.hash160( buffer.Buffer.from( preimage, "hex" ) ).toString( "hex" ) == hash ) {
+                                    console.log( "it does! here is its index:", index2 );
+                                    proper_order.push( index2 );
+                                }
+                            });
+                        });
+                        proper_order.forEach( function( item ) {
+                            ordered_preimages.push( unordered_preimages[ item ] );
+                        });
+                        console.log( "proper order:", proper_order );
+                        determineWinner( ordered_preimages, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+                        resolve( roster_of_preimages_is_full );
+                    }
+                });
+            }
+            async function getTimeoutData( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner ) {
+                var roster_of_preimages_is_full = await isRosterOfPreimagesFullYet( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+                return roster_of_preimages_is_full;
+            }
+            var returnable = await getTimeoutData( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+            return returnable;
+        }
+    </script>
+    <script>
+        function determineWinner( preimages, mynum, info_for_withdrawing_from_lottery_address_as_winner ) {
+            info_for_withdrawing_from_lottery_address_as_winner = JSON.parse( atob( info_for_withdrawing_from_lottery_address_as_winner ) );
+            var funding_txid = info_for_withdrawing_from_lottery_address_as_winner[ "funding_txid" ];
+            var num_of_players = Number( info_for_withdrawing_from_lottery_address_as_winner[ "num_of_players" ] );
+            var bet_amount = Number( info_for_withdrawing_from_lottery_address_as_winner[ "bet_amount" ] );
+            var winnings_address = info_for_withdrawing_from_lottery_address_as_winner[ "winnings_address" ];
+            var array_of_hashes_and_pubkeys = info_for_withdrawing_from_lottery_address_as_winner[ "array_of_hashes_and_pubkeys" ];
+            var privkey = info_for_withdrawing_from_lottery_address_as_winner[ "privkey" ];
+            console.log( "my num:", mynum );
+            console.log( "my preimage:", preimages[ mynum ] );
+            console.log( "all preimages:", JSON.stringify( preimages ) );
+            var nums = [];
+            preimages.forEach( function( preimage ) {
+                nums.push( ( preimage.length / 2 ) - 16 );
+            });
+            console.log( "nums:", JSON.stringify( nums ) );
+            var sum = 0;
+            nums.forEach( function( num ) {
+                sum = sum + num;
+            });
+            var modulus = sum % preimages.length;
+            console.log( "modulus:", modulus );
+            if ( modulus == mynum ) {
+                var winning_tx = withdrawFromLotteryAddress( funding_txid, num_of_players, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, preimages );
+                console.log( "here is the winning transaction:", winning_tx );
+                pushBTCpmt( winning_tx );
+                alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
+            } else {
+                alert( "you lost! Consider trying again." );
+            }
+        }
+    </script>
+    <script>
         function rosterIsFull() {
             if ( !sessionStorage[ "num_of_players" ] ) {
                 return false;
@@ -1589,6 +1669,23 @@
                 var info_about_the_players = JSON.parse( sessionStorage[ "info_about_the_players" ] );
             }
             if ( info_about_the_players.length == Number( sessionStorage[ "num_of_players" ] - 1 ) ) {
+                return true;
+            }
+        }
+    </script>
+    <script>
+        function rosterOfPreimagesIsFull( mypreimage ) {
+            if ( !sessionStorage[ "num_of_players" ] ) {
+                return false;
+            }
+            if ( !sessionStorage[ "roster_of_preimages" ] || sessionStorage[ "roster_of_preimages" ] == "" ) {
+                var roster_of_preimages = [];
+                roster_of_preimages.push( mypreimage );
+                sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
+            } else {
+                var roster_of_preimages = JSON.parse( sessionStorage[ "roster_of_preimages" ] );
+            }
+            if ( roster_of_preimages.length == Number( sessionStorage[ "num_of_players" ] ) ) {
                 return true;
             }
         }
@@ -1919,6 +2016,14 @@
             }
             var bet_amount = Number( document.getElementById( "bet_amount" ).value );
             var num_of_players = Number( document.getElementsByClassName( "player_pubkey" ).length ) + 1;
+            if ( !sessionStorage[ "num_of_players" ] && num_of_players && num_of_players != "" ) {
+                sessionStorage[ "num_of_players" ] = num_of_players;
+            }
+            if ( sessionStorage[ "num_of_players" ] && num_of_players && num_of_players != "" && Number( sessionStorage[ "num_of_players" ] ) != num_of_players ) {
+                alert( "One of your counterparties says the number of players is different from what you say it is. Aborting. Consider trying again." );
+                window.location.reload();
+                return;
+            }
             var winnings_address = document.getElementById( "winnings_address" ).value;
             if ( !winnings_address || winnings_address == "" ) {
                 winnings_address = prompt( "Looks like you forgot to put in a bitcoin address where your winnings should go if you win. Please paste one here." );
@@ -1966,6 +2071,9 @@
                 var sixteen_plus_rand = 16 + rand;
                 var preimage = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, ( sixteen_plus_rand * 2 ) );
                 var numhash = bitcoinjs.crypto.hash160( buffer.Buffer.from( preimage, "hex" ) ).toString( "hex" );
+                var roster_of_preimages = [];
+                roster_of_preimages.push( preimage );
+                sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
                 var session = {}
                 session[ "amount" ] = bet_amount;
                 session[ "num_of_players" ] = num_of_players;
