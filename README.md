@@ -45,5 +45,4 @@ The short answer is: I alphabetize the players' pubkeys and choose the "highest"
 
 - Change all the transactions to use a reasonable fee, not a hard coded 500 sats
 - Detect possible cheating attempts in advance by noticing unexpected delays and indicate for users what will happen next (e.g. when they will be guaranteed to get their money back)
-- Support bech32 encoding for nostr pubkeys
-- Automatically warn users if they obviously entered someone's nostr pubkey incorrectly (e.g. not 64 characters or not properly encoded)
+- Automatically warn users if they obviously entered someone's nostr pubkey incorrectly (e.g. not 64 characters or not hex encoded)
