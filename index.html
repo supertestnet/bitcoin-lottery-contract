@@ -749,11 +749,15 @@
             console.log( collateral_withdrawal_tx );
             var i_should_wait_to_withdraw_my_collateral = confirm( "The lottery funding transaction was broadcasted but one or more of your counterparties can doublespend its inputs because it isn't in a block yet. If you want to wait for it confirm (recommended), click OK. If you trust your counterparty or counterparties and you all agree to go the trusted fast-route where you don't wait for the funding transaction to confirm, click cancel (not recommended)." );
             if ( i_should_wait_to_withdraw_my_collateral ) {
+                sessionStorage[ "wait_state" ] = "waiting";
                 document.getElementById( "progressBar" ).style.width = "70%";
                 document.getElementById( "current_status" ).value = "awaiting confirmation of this tx: " + getIdFromPSBT( fully_signed_psft );
                 console.log( "waiting for the funding tx to get confirmed. Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
                 var txIsSufficientlyConfirmed = await waitForConfs( getIdFromPSBT( fully_signed_psft ), 1 );
+                sessionStorage[ "wait_state" ] = "done";
                 console.log( "yay, the funding tx got confirmed! Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
+            } else {
+                sessionStorage[ "wait_state" ] = "skipping";
             }
             document.getElementById( "progressBar" ).style.width = "75%";
             document.getElementById( "current_status" ).value = "withdrawing your collateral & waiting for your opponents";
@@ -1360,8 +1364,10 @@
         function takeTxsAndGetPreimageFromThem( txs, hash ) {
             return new Promise( async function( resolve, reject ) {
                 if ( txs.length > 1 ) {
-                    document.getElementById( "progressBar" ).style.width = "80%";
-                    document.getElementById( "current_status" ).value = "getting your opponents' random numbers from the blockchain";
+                    if ( sessionStorage[ "wait_state" ] && ( sessionStorage[ "wait_state" ] == "skipping" || sessionStorage[ "wait_state" ] == "done" ) ) {
+                        document.getElementById( "progressBar" ).style.width = "80%";
+                        document.getElementById( "current_status" ).value = "getting your opponents' random numbers from the blockchain";
+                    }
                     console.log( "here comes the ten second timeout -- I wait ten seconds because sometimes esplora knows a txid is associated with an address (so that check returns true) but it has not parsed and stored all the info for that txid yet, so I need to give it a bit of time to do that" );
                     var timeout = await waitSomeSeconds( 10 );
                     console.log( "ok the ten second timeout is done, let's continue" );
