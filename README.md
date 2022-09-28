@@ -45,6 +45,6 @@ The short answer is: I alphabetize the players' pubkeys and choose the "highest"
 
 - Change all the transactions to use a reasonable fee, not a hard coded 500 sats
 - Detect possible cheating attempts in advance by noticing unexpected delays and indicate for users what will happen next (e.g. when they will be guaranteed to get their money back)
+- Detect if the funding transaction never confirms (such as due to successful mempool manipulation by one of the players) and if that happens, auto abort on behalf of each player
 - Automatically warn users if they obviously entered someone's nostr pubkey incorrectly (e.g. not 64 characters, or not hex encoded, or their own pubkey)
 - Add resliency. Users report that if they switch apps on mobile while things are getting signed, the progress bar never moves again. I suspect their device severs their websocket connection and if/when it reconnets, they don't get the messages they need to get because the messages are ephemeral. Topher suggests not using ephemeral events but rather requesting event deletion after an event is no longer needed. (But relays aren't meant to delete events upon deletion requests, clients are just supposed to hide them, so maybe that's dumb?)
-- Detect if the funding transaction never confirms (such as due to successful mempool manipulation) and if that happens, auto abort on behalf of users
