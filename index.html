@@ -2028,7 +2028,7 @@
     </p>
     <h2>Progress bar</h2>
     <div id="progressOutline" style="height: 30px; border: 3px solid black;"><div id="progressBar" style="height: 30px; background-color: #61eb34; width: 0%; transition: width 1s;"></div></div>
-    <p>Current status: <input type="text" id="current_status" name="current_status" disabled style="width: 100%; font-size: 20px" value="waiting for you and other players to start the game" /></p>
+    <p>Current status: <input type="text" id="current_status" name="current_status" disabled style="width: 100%; font-size: 20px" value="waiting for you and one or more other players to start the game" /></p>
     <p>
         <button id="abort_button" type="button" style="display: none;" onclick='if( confirm( "Are you sure you want to abort this game? Your funds will be withdrawn for safety and you should see them in your wallet soon." ) ) {pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );setTimeout( function() {window.location.reload();}, 3000 );}'>Abort</button>
     </p>
