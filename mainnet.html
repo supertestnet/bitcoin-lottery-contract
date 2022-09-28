@@ -750,7 +750,7 @@
             var i_should_wait_to_withdraw_my_collateral = confirm( "The lottery funding transaction was broadcasted but one or more of your counterparties can doublespend its inputs because it isn't in a block yet. If you want to wait for it confirm (recommended), click OK. If you trust your counterparty or counterparties and you all agree to go the trusted fast-route where you don't wait for the funding transaction to confirm, click cancel (not recommended)." );
             if ( i_should_wait_to_withdraw_my_collateral ) {
                 document.getElementById( "progressBar" ).style.width = "70%";
-                document.getElementById( "current_status" ).value = "waiting for the funding tx to confirm";
+                document.getElementById( "current_status" ).value = "awaiting confirmation of this tx: " + getIdFromPSBT( fully_signed_psft );
                 console.log( "waiting for the funding tx to get confirmed. Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
                 var txIsSufficientlyConfirmed = await waitForConfs( getIdFromPSBT( fully_signed_psft ), 1 );
                 console.log( "yay, the funding tx got confirmed! Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
