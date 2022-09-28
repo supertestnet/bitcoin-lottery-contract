@@ -47,3 +47,4 @@ The short answer is: I alphabetize the players' pubkeys and choose the "highest"
 - Detect possible cheating attempts in advance by noticing unexpected delays and indicate for users what will happen next (e.g. when they will be guaranteed to get their money back)
 - Automatically warn users if they obviously entered someone's nostr pubkey incorrectly (e.g. not 64 characters or not hex encoded)
 - Add resliency. Users report that if they switch apps on mobile while things are getting signed, the progress bar never moves again. I suspect their device severs their websocket connection and if/when it reconnets, they don't get the messages they need to get.
+- Detect if the funding transaction never confirms (such as due to successful mempool manipulation) and if that happens, auto abort on behalf of users
