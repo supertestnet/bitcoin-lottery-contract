@@ -2090,10 +2090,14 @@
             var pubkey = keypair.publicKey.toString( "hex" );
             var deposit_address = getNativeSegwitAddressFromPrivkeyHex( privkey );
             var alert_text = `Please deposit exactly ${deposit_minimum} sats into the bitcoin address displayed below. The breakdown for this deposit amount is: ${bet_amount} sats will fund the lottery address; 500 sats are reserved for transaction fees; ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } sats serve as collateral, you'll get that part back later (it will go into your winnings address regardless of whether you actually win or not), plus more if you win the lottery. ${bet_amount} + ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } + 500 = ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + 500 + bet_amount } sats`;
+            var amount_prep = String( deposit_minimum ).padStart( 9, '0');
+            var fp = amount_prep.substring( 0, amount_prep.length - 8 );
+            var sp = amount_prep.substring( amount_prep.length - 8 );
+            var amount_in_btc = fp + "." + sp;
             var qr = document.createElement( "a" );
-            qr.href = "BITCOIN:" + deposit_address.toUpperCase();
+            qr.href = "bitcoin:" + deposit_address.toUpperCase() + "?amount=" + String( amount_in_btc );
             qr.target = "_blank";
-            qr.append( createQR( deposit_address ) );
+            qr.append( createQR( deposit_address + "?amount=" + String( amount_in_btc ) ) );
             document.body.append( qr );
             var p = document.createElement( "p" );
             p.innerText = deposit_address + " - precise deposit amount: " + deposit_minimum + " sats";
