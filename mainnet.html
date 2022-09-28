@@ -2092,7 +2092,7 @@
             qr.append( createQR( deposit_address.toUpperCase() + "?AMOUNT=" + String( amount_in_btc ) ) );
             document.body.append( qr );
             var p = document.createElement( "p" );
-            p.innerText = deposit_address + " - precise deposit amount: " + deposit_minimum + " sats";
+            p.innerHTML = "Bitcoin address: " + deposit_address + "<br><br>Precise deposit amount: " + deposit_minimum + " sats";
             document.body.append( p );
             alert( alert_text );
             var moneyArrived = await waitForMoneyToArriveInAddress( deposit_address );
