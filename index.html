@@ -2097,7 +2097,7 @@
             var qr = document.createElement( "a" );
             qr.href = "bitcoin:" + deposit_address.toUpperCase() + "?amount=" + String( amount_in_btc );
             qr.target = "_blank";
-            qr.append( createQR( deposit_address + "?amount=" + String( amount_in_btc ) ) );
+            qr.append( createQR( deposit_address.toUpperCase() + "?AMOUNT=" + String( amount_in_btc ) ) );
             document.body.append( qr );
             var p = document.createElement( "p" );
             p.innerText = deposit_address + " - precise deposit amount: " + deposit_minimum + " sats";
