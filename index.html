@@ -2095,7 +2095,7 @@
             var sp = amount_prep.substring( amount_prep.length - 8 );
             var amount_in_btc = fp + "." + sp;
             var qr = document.createElement( "a" );
-            qr.href = "bitcoin:" + deposit_address.toUpperCase() + "?amount=" + String( amount_in_btc );
+            qr.href = "bitcoin:" + deposit_address + "?amount=" + String( amount_in_btc );
             qr.target = "_blank";
             qr.append( createQR( deposit_address.toUpperCase() + "?AMOUNT=" + String( amount_in_btc ) ) );
             document.body.append( qr );
