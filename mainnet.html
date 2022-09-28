@@ -3,12 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <style>
+        * {
+            box-sizing: border-box;
+        }
         html {
-          max-width: 70ch;
-          padding: 3em 1em;
-          margin: auto;
-          line-height: 1.25;
-          font-size: 20px;
+            max-width: 70ch;
+            padding: 3em 1em;
+            margin: auto;
+            line-height: 1.25;
+            font-size: 1.15em;
+            font-family: Arial, sans-serif;
+        }
+        input {
+            line-height: 1.25;
+            font-size: 1em;
+            font-family: Arial, sans-serif;
+            width: 100%;
         }
     </style>
     <script src="https://bitcoincore.tech/apps/bitcoinjs-ui/lib/bitcoinjs-lib.js"></script>
@@ -719,7 +729,7 @@
             console.log( JSON.stringify( fully_signed_collateral_withdrawal_transactions ) );
             sessionStorage[ "fully_signed_collateral_withdrawal_transactions" ] = JSON.stringify( fully_signed_collateral_withdrawal_transactions );
             document.getElementById( "progressBar" ).style.width = "45%";
-            document.getElementById( "current_status" ).value = "preparing lottery address";
+            document.getElementById( "current_status" ).innerText = "preparing lottery address";
             var fully_signed_lottery_withdrawal_transaction = await cosignLotteryTransaction( funding_txid, players.length, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses_for_lottery_address, privkey, players, mynum );
             console.log( "fully signed pslt:" );
             console.log( fully_signed_lottery_withdrawal_transaction );
@@ -729,7 +739,7 @@
             sessionStorage[ "fully_signed_pslt_tx" ] = fully_signed_pslt_tx;
             console.log( "time to fund the transaction! You've got all the signed things" );
             document.getElementById( "progressBar" ).style.width = "55%";
-            document.getElementById( "current_status" ).value = "preparing funding transaction";
+            document.getElementById( "current_status" ).innerText = "preparing funding transaction";
             var fully_signed_psft = await cosignPSBT( funding_psbt, privkey, mynum, players );
             if ( mynum == players.length - 1 ) {
                 var timeout = await waitSomeSeconds( players.length + 1 );
@@ -742,7 +752,7 @@
             pushBTCpmt( fully_signed_psft_tx, "psft" );
             document.getElementById( "abort_button" ).parentElement.remove();
             document.getElementById( "progressBar" ).style.width = "65%";
-            document.getElementById( "current_status" ).value = "preparing punishments for anyone who tries to cheat";
+            document.getElementById( "current_status" ).innerText = "preparing punishments for anyone who tries to cheat";
             setTimeout( function() {punishCheaters( fully_signed_psft );}, 3000 );
             var collateral_withdrawal_tx = withdrawFromCollateralAddress( funding_txid, mynum, winnings_address, bet_amount, array_of_pubkeys, privkey, preimage );
             console.log( "after you broadcast the funding tx, decide whether to wait for it to confirm (recommended) or trust your counterparties not to doublespend its inputs (not recommended). If you decide not to wait, is also time to broadcast the collateral withdrawal tx:" );
@@ -751,7 +761,7 @@
             if ( i_should_wait_to_withdraw_my_collateral ) {
                 sessionStorage[ "wait_state" ] = "waiting";
                 document.getElementById( "progressBar" ).style.width = "70%";
-                document.getElementById( "current_status" ).value = "awaiting confirmation of this tx: " + getIdFromPSBT( fully_signed_psft );
+                document.getElementById( "current_status" ).innerHTML = `awaiting confirmation of this transaction: <a href="https://mempool.space/tx/${getIdFromPSBT( fully_signed_psft )}" target="_blank">${getIdFromPSBT( fully_signed_psft )}</a>`;
                 console.log( "waiting for the funding tx to get confirmed. Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
                 var txIsSufficientlyConfirmed = await waitForConfs( getIdFromPSBT( fully_signed_psft ), 1 );
                 sessionStorage[ "wait_state" ] = "done";
@@ -760,7 +770,7 @@
                 sessionStorage[ "wait_state" ] = "skipping";
             }
             document.getElementById( "progressBar" ).style.width = "75%";
-            document.getElementById( "current_status" ).value = "withdrawing your collateral & waiting for your opponents";
+            document.getElementById( "current_status" ).innerText = "withdrawing your collateral & waiting for your opponents";
             pushBTCpmt( collateral_withdrawal_tx );
             console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
             var other_addresses = [];
@@ -873,7 +883,7 @@
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 document.getElementById( "progressBar" ).style.width = "40%";
-                document.getElementById( "current_status" ).value = "waiting for opponents' signatures";
+                document.getElementById( "current_status" ).innerText = "waiting for opponents' signatures";
                 var fully_signed_pswts = await getNote( "fully_signed_pswts" );
                 fully_signed_pswts = JSON.parse( fully_signed_pswts );
                 fully_signed_pswts.forEach( function( withdrawal_psbt ) {
@@ -955,7 +965,7 @@
                 sendable[ "mid_pswts" ] = JSON.stringify( new_pswts );
                 sendDM( JSON.stringify( sendable ), nostr_key_above_me );
                 document.getElementById( "progressBar" ).style.width = "40%";
-                document.getElementById( "current_status" ).value = "waiting for opponents' signatures";
+                document.getElementById( "current_status" ).innerText = "waiting for opponents' signatures";
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 var fully_signed_pswts = await getNote( "fully_signed_pswts" );
@@ -989,7 +999,7 @@
             }
             if ( mynum == pubkeys.length - 1 ) {
                 document.getElementById( "progressBar" ).style.width = "40%";
-                document.getElementById( "current_status" ).value = "waiting for opponents' signatures";
+                document.getElementById( "current_status" ).innerText = "waiting for opponents' signatures";
                 //wait for some pswts from the signer below me, validate and sign them, then send the fully signed pswts to every other key
                 console.log( "remember to send the following pswts to everyone else" );
                 var sendable = {}
@@ -1030,7 +1040,7 @@
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 document.getElementById( "progressBar" ).style.width = "50%";
-                document.getElementById( "current_status" ).value = "waiting for more signatures from your opponents";
+                document.getElementById( "current_status" ).innerText = "waiting for more signatures from your opponents";
                 var fully_signed_pslt = await getNote( "fully_signed_pslt" );
                 var psbt = bitcoinjs.Psbt.fromHex( fully_signed_pslt );
                 all_pubkeys.forEach( function( key ) {
@@ -1107,7 +1117,7 @@
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 document.getElementById( "progressBar" ).style.width = "50%";
-                document.getElementById( "current_status" ).value = "waiting for more signatures from your opponents";
+                document.getElementById( "current_status" ).innerText = "waiting for more signatures from your opponents";
                 var fully_signed_pslt = await getNote( "fully_signed_pslt" );
                 var expected_pslt = startWithdrawingFromLotteryAddressAsMultisig( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey );
                 var expected_pslt_txid = getIdFromPSBT( expected_pslt );
@@ -1139,7 +1149,7 @@
             if ( mynum == players.length - 1 ) {
                 //wait for a pslt from the signer below me, validate and sign it, then send the fully signed pslt to every other key
                 document.getElementById( "progressBar" ).style.width = "50%";
-                document.getElementById( "current_status" ).value = "waiting for more signatures from your opponents";
+                document.getElementById( "current_status" ).innerText = "waiting for more signatures from your opponents";
                 console.log( "remember to send the following pslt to everyone else" );
                 var sendable = {}
                 sendable[ "msg_type" ] = "finalized pslt";
@@ -1175,7 +1185,7 @@
                 var expected_psbt = psbthex;
                 var expected_psbt_txid = getIdFromPSBT( expected_psbt );
                 document.getElementById( "progressBar" ).style.width = "60%";
-                document.getElementById( "current_status" ).value = "waiting for yet more signatures from your opponents";
+                document.getElementById( "current_status" ).innerText = "waiting for yet more signatures from your opponents";
                 var fully_signed_psbt = await getNote( "fully_signed_psbt" );
                 var decoded_psbt = bitcoinjs.Psbt.fromHex( fully_signed_psbt );
                 all_pubkeys.forEach( function( key, index ) {
@@ -1253,7 +1263,7 @@
                 var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
                 console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
                 document.getElementById( "progressBar" ).style.width = "60%";
-                document.getElementById( "current_status" ).value = "waiting for yet more signatures from your opponents";
+                document.getElementById( "current_status" ).innerText = "waiting for yet more signatures from your opponents";
                 var fully_signed_psbt = await getNote( "fully_signed_psbt" );
                 var decoded_psbt = bitcoinjs.Psbt.fromHex( fully_signed_psbt );
                 all_pubkeys.forEach( function( key, index ) {
@@ -1282,7 +1292,7 @@
             }
             if ( mynum == players.length - 1 ) {
                 document.getElementById( "progressBar" ).style.width = "60%";
-                document.getElementById( "current_status" ).value = "waiting for yet more signatures from your opponents";
+                document.getElementById( "current_status" ).innerText = "waiting for yet more signatures from your opponents";
                 console.log( "remember to send the following psbt to everyone else" );
                 var sendable = {}
                 sendable[ "msg_type" ] = "finalized psft";
@@ -1364,9 +1374,9 @@
         function takeTxsAndGetPreimageFromThem( txs, hash ) {
             return new Promise( async function( resolve, reject ) {
                 if ( txs.length > 1 ) {
-                    if ( document.getElementById( "current_status" ).value != "preparing punishments for anyone who tries to cheat" && document.getElementById( "current_status" ).value != "game is done" && sessionStorage[ "wait_state" ] && ( sessionStorage[ "wait_state" ] == "skipping" || sessionStorage[ "wait_state" ] == "done" ) ) {
+                    if ( document.getElementById( "current_status" ).innerText != "preparing punishments for anyone who tries to cheat" && document.getElementById( "current_status" ).innerText != "game is done" && sessionStorage[ "wait_state" ] && ( sessionStorage[ "wait_state" ] == "skipping" || sessionStorage[ "wait_state" ] == "done" ) ) {
                         document.getElementById( "progressBar" ).style.width = "80%";
-                        document.getElementById( "current_status" ).value = "getting your opponents' random numbers from the blockchain";
+                        document.getElementById( "current_status" ).innerText = "getting your opponents' random numbers from the blockchain";
                     }
                     console.log( "here comes the ten second timeout -- I wait ten seconds because sometimes esplora knows a txid is associated with an address (so that check returns true) but it has not parsed and stored all the info for that txid yet, so I need to give it a bit of time to do that" );
                     var timeout = await waitSomeSeconds( 10 );
@@ -1642,7 +1652,7 @@
                         }, 5000 );
                     } else {
                         document.getElementById( "progressBar" ).style.width = "85%";
-                        document.getElementById( "current_status" ).value = "checking if you won";
+                        document.getElementById( "current_status" ).innerText = "checking if you won";
                         var ordered_preimages = [];
                         var proper_order = [];
                         var unordered_preimages = JSON.parse( sessionStorage[ "roster_of_preimages" ] );
@@ -1697,7 +1707,7 @@
             var modulus = sum % preimages.length;
             console.log( "modulus:", modulus );
             document.getElementById( "progressBar" ).style.width = "100%";
-            document.getElementById( "current_status" ).value = "game is done";
+            document.getElementById( "current_status" ).innerText = "game is done";
             if ( modulus == mynum ) {
                 var winning_tx = withdrawFromLotteryAddress( funding_txid, num_of_players, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, preimages );
                 console.log( "here is the winning transaction:", winning_tx );
@@ -1992,18 +2002,19 @@
                 input.type = "text";
                 input.className = "player_pubkey";
                 input.name = "player_pubkey";
-                input.style.width = "50%";
+                input.style.width = "calc( 100% - 40px )";
+                input.style.marginRight = "10px";
                 input.style.marginBottom = "20px";
                 document.getElementById( "player_pubkeys" ).append( input );
                 var minus = document.createElement( "div" );
                 minus.id = "minus_button";
-                minus.style = "display: none; border: 1px solid black; padding: 0px 5px; cursor: pointer; width: 20px; text-align: center;";
+                minus.style = "display: none; border: 1px solid black; padding: 0px 5px; cursor: pointer; width: 30px; text-align: center;";
                 minus.innerText = "-";
                 minus.onclick = function() {this.previousElementSibling.remove();this.remove();}
                 document.getElementById( "player_pubkeys" ).append( minus );
                 var plus = document.createElement( "div" );
                 plus.id = "plus_button";
-                plus.style = "display: inline-block; border: 1px solid black; padding: 0px 5px; cursor: pointer; width: 20px; text-align: center;";
+                plus.style = "display: inline-block; border: 1px solid black; padding: 0px 5px; cursor: pointer; width: 30px; text-align: center;";
                 plus.innerText = "+";
                 plus.onclick = function() {makeAnotherPlayer( this );}
                 document.getElementById( "player_pubkeys" ).append( plus );
@@ -2016,7 +2027,7 @@
 <body>
     <h1>Bitcoin lottery</h1>
     <p>Your public key</p>
-    <input type="text" id="nostr_pubkey" name="nostr_pubkey" disabled style="width: 50%;" />
+    <input type="text" id="nostr_pubkey" name="nostr_pubkey" disabled />
     <p>Bet amount (in sats)</p>
     <input type="number" id="bet_amount" name="bet_amount" min="540" value="540" step="1" />
     <p>Address where your winnings, if any, should go</p>
@@ -2027,41 +2038,16 @@
         <button id="submitter" type="button">Submit</button>
     </p>
     <h2>Progress bar</h2>
-    <div id="progressOutline" style="height: 30px; border: 3px solid black;"><div id="progressBar" style="height: 30px; background-color: #61eb34; width: 0%; transition: width 1s;"></div></div>
-    <p>Current status: <input type="text" id="current_status" name="current_status" disabled style="width: 100%; font-size: 20px" value="waiting for you and one or more other players to start the game" /></p>
+    <div id="progressOutline" style="height: 30px; border: 1px solid grey; border-radius: 25px; overflow: hidden;"><div id="progressBar" style="height: 30px; background-color: #61eb34; width: 0%; transition: width 1s;"></div></div>
+    <p style="margin-bottom: 3px; overflow-wrap: break-word;">Current status:</p>
+    <div id="current_status" name="current_status" style="border: 1px solid grey; padding: 3px;">waiting for you and one or more other players to start the game</div>
     <p>
         <button id="abort_button" type="button" style="display: none;" onclick='if( confirm( "Are you sure you want to abort this game? Your funds will be withdrawn for safety and you should see them in your wallet soon." ) ) {pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );setTimeout( function() {window.location.reload();}, 3000 );}'>Abort</button>
     </p>
     <script>
-        document.getElementById( "current_status" ).value = "waiting for you and other players to start the game";
+        document.getElementById( "current_status" ).innerText = "waiting for you and other players to start the game";
         makeAnotherPlayer();
         document.getElementById( "nostr_pubkey" ).value = nostr_pubKey;
-/*
-        var img = document.createElement( "img" );
-        img.style.transition = "opacity 1s";
-        img.className = "grey_horse";
-        img.src = "./dark-grey-horse.png";
-        img.addEventListener( "transitionstart", function() {
-            if ( img.style.opacity != "0.8" ) {
-                setTimeout( function() {img.style.opacity = "0.8";}, 1000 )
-            } else {
-                setTimeout( function() {img.style.opacity = "0.5";}, 1000 )
-            }
-        });
-        img.addEventListener( "transitionend", function() {
-            if ( img.style.opacity != "0.8" ) {
-                setTimeout( function() {img.style.opacity = "0.8";}, 1000 )
-            } else {
-                setTimeout( function() {img.style.opacity = "0.5";}, 1000 )
-            }
-        });
-        document.body.append( img );
-        if ( img.style.opacity != "0.5" ) {
-            setTimeout( function() {img.style.opacity = "0.5";}, 1000 );
-        } else {
-            setTimeout( function() {img.style.opacity = "0.8";}, 1000 );
-        }
-*/
         document.getElementById( "submitter" ).addEventListener( "click", async function() {
             var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
                 if ( ( !document.getElementsByClassName( "player_pubkey" )[ i ].value || document.getElementsByClassName( "player_pubkey" )[ i ].value == "" ) && !rosterIsFull() ) {
@@ -2088,7 +2074,7 @@
             document.getElementById( "player_pubkeys" ).previousElementSibling.style.display = "none";
             document.getElementById( "submitter" ).remove();
             document.getElementById( "progressBar" ).style.width = "5%";
-            document.getElementById( "current_status" ).value = "waiting for your deposit";
+            document.getElementById( "current_status" ).innerText = "waiting for your deposit";
             var deposit_minimum = ( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + bet_amount + 500;
             var keypair = bitcoinjs.ECPair.makeRandom();
             var privkey = keypair.privateKey.toString( "hex" );
@@ -2113,7 +2099,7 @@
             if ( moneyArrived ) {
                 document.getElementById( "abort_button" ).style.display = "inline";
                 document.getElementById( "progressBar" ).style.width = "15%";
-                document.getElementById( "current_status" ).value = "waiting for your opponents' deposits";
+                document.getElementById( "current_status" ).innerText = "waiting for your opponents' deposits";
                 var txid = await getIdOfTxThatSentMoneyToAddress( deposit_address );
                 var url = "https://mempool.space/api/tx/" + txid;
                 var tx = await getData( url );
@@ -2187,7 +2173,7 @@
                 var roster_is_full = await waitForFullRoster();
                 if ( roster_is_full ) {
                     document.getElementById( "progressBar" ).style.width = "25%";
-                    document.getElementById( "current_status" ).value = "everyone deposited their money -- preparing collateral addresses";
+                    document.getElementById( "current_status" ).innerText = "everyone deposited their money -- preparing collateral addresses";
                     document.getElementById( "counterparty" ).value = sessionStorage[ "info_about_the_players" ];
                     document.getElementById( "submit_counterparty" ).click();
                 }
