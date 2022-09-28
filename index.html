@@ -1364,7 +1364,7 @@
         function takeTxsAndGetPreimageFromThem( txs, hash ) {
             return new Promise( async function( resolve, reject ) {
                 if ( txs.length > 1 ) {
-                    if ( sessionStorage[ "wait_state" ] && ( sessionStorage[ "wait_state" ] == "skipping" || sessionStorage[ "wait_state" ] == "done" ) ) {
+                    if ( document.getElementById( "current_status" ).value != "game is done" && sessionStorage[ "wait_state" ] && ( sessionStorage[ "wait_state" ] == "skipping" || sessionStorage[ "wait_state" ] == "done" ) ) {
                         document.getElementById( "progressBar" ).style.width = "80%";
                         document.getElementById( "current_status" ).value = "getting your opponents' random numbers from the blockchain";
                     }
