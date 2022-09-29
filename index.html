@@ -23,6 +23,21 @@
         input {
             line-height: 1.25;
             width: 100%;
+            height: 1.8em;
+        }
+        #plus_button, .minus_button {
+            display: inline-block;
+            border: 1px solid grey;
+            padding: 0px 5px;
+            cursor: pointer;
+            width: 2em;
+            text-align: center;
+            vertical-align: top;
+            height: 1.8em;
+            line-height: 1.8em;
+        }
+        .minus_button {
+            display: none;
         }
     </style>
     <script src="https://bitcoincore.tech/apps/bitcoinjs-ui/lib/bitcoinjs-lib.js"></script>
@@ -2055,14 +2070,12 @@
                 input.style.marginBottom = "1em";
                 document.getElementById( "player_pubkeys" ).append( input );
                 var minus = document.createElement( "div" );
-                minus.id = "minus_button";
-                minus.style = "display: none; border: 1px solid black; padding: 0px 5px; cursor: pointer; width: 2em; text-align: center;";
+                minus.className = "minus_button";
                 minus.innerText = "-";
                 minus.onclick = function() {this.previousElementSibling.remove();this.remove();}
                 document.getElementById( "player_pubkeys" ).append( minus );
                 var plus = document.createElement( "div" );
                 plus.id = "plus_button";
-                plus.style = "display: inline-block; border: 1px solid black; padding: 0px 5px; cursor: pointer; width: 2em; text-align: center;";
                 plus.innerText = "+";
                 plus.onclick = function() {makeAnotherPlayer( this );}
                 document.getElementById( "player_pubkeys" ).append( plus );
