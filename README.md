@@ -44,9 +44,5 @@ The short answer is: I alphabetize the players' pubkeys and choose the "highest"
 # TODO
 
 - Change all the transactions to use a reasonable fee, not a hard coded 500 sats
-- Detect unexpected delays and warn users about them
-  - If the funding transaction already confirmed, there is a possible "sore loser" scenario. The user might need to wait up to 16 blocks but they are guaranteed to either win or lose fairly if they wait that long
-  - If the funding transaction is not broadcasted yet, there is a possible griefing attack. The user should probably abort
-  - If the funding transaction got ejected from the mempool, there is possible mempool manipulation. The user should probably abort
 - Automatically warn users if they obviously entered someone's nostr pubkey incorrectly (e.g. not 64 characters, or not hex encoded, or their own pubkey)
 - Add resliency. Users report that if they switch apps on mobile while things are getting signed, the progress bar never moves again. I suspect their device severs their websocket connection and when it reconnets, they don't get the psbt signing messages they need because the messages were sent ephemerally. Topher suggests not using ephemeral events but rather requesting event deletion after an event is no longer needed. (But relays aren't meant to delete events upon deletion requests, clients are just supposed to hide them, so maybe that's dumb?)
