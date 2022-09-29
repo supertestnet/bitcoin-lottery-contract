@@ -2,6 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no" />
     <style>
         * {
             box-sizing: border-box;
@@ -1590,9 +1591,13 @@
                     if ( type == "justice" ) {
                         alert( "You won! A sore loser delayed your victory but justice was served. Keep your browser open for another 8 blocks to get a small reimbursement as a result of their sore-losering. And get rid of this alert message because it might eventually mess up the scripts that your browser needs to run." );
                         sessionStorage[ "user_was_warned_about_waiting_another_eight_blocks" ] = true;
+                        document.getElementById( "progressBar" ).style.width = "95%";
+                        document.getElementById( "current_status" ).innerText = "waiting 8 more blocks to get you your reimbursement";
                     }
                     if ( type == "reimbursement" ) {
                         alert( "You got a small reimbursement! Some of the money the sore loser put up as collateral was rewarded to you because they tried to delay the resolution of this lottery." );
+                        document.getElementById( "progressBar" ).style.width = "100%";
+                        document.getElementById( "current_status" ).innerText = "game is done";
                     }
                 } else {
                     if ( type == "psft" && this.status > 399 ) {
