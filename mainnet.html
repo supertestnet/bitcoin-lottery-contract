@@ -25,6 +25,7 @@
             width: 100%;
             height: 1.8em;
             font-size: 25px;
+            border: 1px solid grey;
         }
         .player_pubkey {
             width: calc( 100% - 3.2em );
@@ -42,6 +43,20 @@
         }
         .minus_button {
             display: none;
+        }
+        @media only screen and ( max-width: 600px ) {
+            input {
+                line-height: 1.25;
+                width: 100%;
+                height: 1.8em;
+                font-size: 40px;
+                border: 1px solid grey;
+            }
+            #plus_button, .minus_button {
+                font-size: 40px;
+                position: relative;
+                top: 3px;
+            }
         }
     </style>
     <script src="https://bitcoincore.tech/apps/bitcoinjs-ui/lib/bitcoinjs-lib.js"></script>
