@@ -171,8 +171,6 @@
                 sig_order.forEach( function( item ) {
                     stack_elements.push( input.partialSig[ item ].signature );
                 });
-                //add a null value i.e. empty string so that it does not hash to the right value and therefore triggers the multisig path
-                stack_elements.push( '' );
                 var witnessStack = bitcoinjs.payments.p2wsh({
                     redeem: {
                         output: script,
