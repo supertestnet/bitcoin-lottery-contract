@@ -1940,7 +1940,7 @@
         async function handleMessage( message ) {
             var [ type, subId, event ] = JSON.parse( message.data );
             var { kind, content } = event || {}
-            if (!event) return
+            if (!event || event === true) return
             var sig_is_valid = await nobleSecp256k1.schnorr.verify( event.sig, event.id, event.pubkey );
             if (!sig_is_valid) return
             if (kind === 20004) {
