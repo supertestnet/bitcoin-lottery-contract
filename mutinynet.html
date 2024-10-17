@@ -70,7 +70,7 @@
     <script src="https://bundle.run/varuint-bitcoin@1.1.2"></script>
     <script>
         function getNativeSegwitAddressFromPrivkeyHex( privkeyhex ) {
-            return bitcoinjs.payments.p2wpkh({ pubkey: bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.mainnet } ).publicKey, network: bitcoinjs.networks.mainnet }).address;
+            return bitcoinjs.payments.p2wpkh({ pubkey: bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.testnet } ).publicKey, network: bitcoinjs.networks.testnet }).address;
         }
     </script>
     <script>
@@ -135,7 +135,7 @@
         }
 
         function collateral( hash, pubkeys, mynum ) {
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, pubkeys, mynum ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, pubkeys, mynum ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             return p2wsh.address;
         }
 
@@ -353,7 +353,7 @@
         }
 
         function receive( array_of_hashes_and_pubkeys ) {
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             return p2wsh.address;
         }
     </script>
@@ -384,7 +384,7 @@
     <script>
         function startFundingPSBT( bet_amount, players, privkey, lotteryAddress, mynum ) {
             var num_of_players = players.length;
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             players.forEach( function( player ) {
                 psbt
                 .addInput({
@@ -451,11 +451,11 @@
             var total_fee = 500;
             var quantity_of_sats_each_player_gets_out = Math.floor( bet_amount * num_of_players - ( 500 * ( 1 / ( num_of_players - 1 ) ) ) );
             var witnessscript = generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum );
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             var scriptaddress = p2wsh.address;
             var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
 
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -486,11 +486,11 @@
             var total_fee = 500;
             var quantity_of_sats_each_player_gets_out = Math.floor( original_quantity_of_sats * ( 1 / num_of_players ) ) - Math.ceil( total_fee * ( 1 / num_of_players ) );
             var witnessscript = generateLotteryWitnessScript( array_of_hashes_and_pubkeys );
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             var scriptaddress = p2wsh.address;
             var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
 
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -572,11 +572,11 @@
             var original_quantity_of_sats = bet_amount * num_of_players * ( num_of_players - 1 );
             var new_quantity_of_sats = original_quantity_of_sats - 500;
             var witnessscript = generateCollateralWitnessScript( hash, array_of_pubkeys, mynum );
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, mynum ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, mynum ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             var scriptaddress = p2wsh.address;
             var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
 
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -627,11 +627,11 @@
             var fee_amount = 500;
             var new_quantity_of_sats = original_quantity_of_sats - fee_amount;
             var witnessscript = generateLotteryWitnessScript( array_of_hashes_and_pubkeys );
-            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.testnet}, network: bitcoinjs.networks.testnet });
             var scriptaddress = p2wsh.address;
             var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
 
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -682,7 +682,7 @@
             var original_quantity_of_sats = ( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + bet_amount + 500;
             var fee_amount = 500;
             var new_quantity_of_sats = original_quantity_of_sats - fee_amount;
-            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.testnet});
             psbt
             .addInput({
                 hash: txid,
@@ -1366,7 +1366,7 @@
     </script>
     <script>
         function getCompressedPubkeyHexFromPrivkeyHex( privkeyhex ) {
-            return bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.mainnet } ).publicKey.toString( "hex" );
+            return bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.testnet } ).publicKey.toString( "hex" );
         }
     </script>
     <script>
