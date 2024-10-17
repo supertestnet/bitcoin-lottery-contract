@@ -1,0 +1,2322 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no" />
+    <style>
+        * {
+            box-sizing: border-box;
+            font-size: 1.15em;
+            font-family: Arial, sans-serif;
+        }
+        html {
+            max-width: 70ch;
+            padding: 3em 1em;
+            margin: auto;
+            line-height: 1.25;
+        }
+        h1 {
+            font-size: 2em;
+        }
+        h2 {
+            font-size: 1.5em;
+        }
+        input {
+            line-height: 1.25;
+            width: 100%;
+            height: 1.8em;
+            font-size: 1.15em;
+            border: 1px solid grey;
+        }
+        .player_pubkey {
+            width: calc( 100% - 2.9em );
+        }
+        #plus_button, .minus_button {
+            display: inline-block;
+            border: 1px solid grey;
+            padding: 0px 5px;
+            cursor: pointer;
+            width: 2em;
+            text-align: center;
+            vertical-align: top;
+            height: 1.8em;
+            line-height: 1.8em;
+        }
+        .minus_button {
+            display: none;
+        }
+/*
+        @media only screen and ( max-width: 600px ) {
+            input {
+                line-height: 1.25;
+                width: 100%;
+                height: 1.8em;
+                font-size: 40px;
+                border: 1px solid grey;
+            }
+            #plus_button, .minus_button {
+                font-size: 40px;
+                position: relative;
+                top: 3px;
+            }
+        }
+*/
+    </style>
+    <script src="https://bitcoincore.tech/apps/bitcoinjs-ui/lib/bitcoinjs-lib.js"></script>
+    <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
+    <script src="https://bundle.run/browserify-cipher@1.0.1"></script>
+    <script src="https://bundle.run/buffer@6.0.3"></script>
+    <script src="https://supertestnet.github.io/bitcoin-chess/js/qrcode.js"></script>
+    <script src="https://bundle.run/varuint-bitcoin@1.1.2"></script>
+    <script>
+        function getNativeSegwitAddressFromPrivkeyHex( privkeyhex ) {
+            return bitcoinjs.payments.p2wpkh({ pubkey: bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.mainnet } ).publicKey, network: bitcoinjs.networks.mainnet }).address;
+        }
+    </script>
+    <script>
+        function firstPubkeyIsBigger( a, b ) {
+            return ( BigInt( "0x" + b ) - BigInt( "0x" + a ) ) < 0;
+        }
+    </script>
+    <script>
+        function generateCollateralWitnessScript( hash, pubkeys, mynum ) {
+            return bitcoinjs.script.fromASM(
+                makeCollateralScript( hash, pubkeys, mynum )
+                .trim()
+                .replace(/\s+/g, ' '),
+            );
+        }
+
+        function makeCollateralScript( hash, pubkeys, mynum ) {
+
+          var num = pubkeys.length;
+          var number = ( Number( 16 ) + Number( num ) ).toString();
+
+          var scr = "";
+
+          var firstpart = `
+          OP_DUP
+          OP_HASH160
+          ${ hash }
+          OP_EQUAL
+          OP_IF
+              OP_SIZE
+              OP_SWAP
+              OP_DROP
+              OP_16
+              ${ bitcoinjs.script.number.encode( number ).toString( 'hex' ) }
+              OP_WITHIN
+              OP_VERIFY
+              ${ pubkeys[ mynum ] }
+              OP_CHECKSIG
+          OP_ELSE
+              OP_8
+              OP_CHECKSEQUENCEVERIFY
+              OP_DROP
+              ${ "OP_" + ( num ).toString() }
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var secondpart = `
+              ${ "OP_" + ( num ).toString() }
+              OP_CHECKMULTISIG
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          scr += firstpart;
+
+          var i; for ( i=0; i<num; i++ ) {
+            scr += `${ pubkeys[ i ] }\n`;
+          }
+
+          scr += secondpart;
+
+          return ( scr );
+
+        }
+
+        function collateral( hash, pubkeys, mynum ) {
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, pubkeys, mynum ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            return p2wsh.address;
+        }
+
+    </script>
+    <script>
+        function withdrawFromCollateralAddressAsMultisigPartners( psbthex, collateralPrivkey ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( collateralPrivkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function withdrawFromCollateralAddressAsLastSigner( psbthex, original_order_of_pubkeys ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            var getFinalScripts = ( txindex, input, script) => {
+                //Step 1: Check to make sure the meaningful locking script matches what you expect.
+                var decompiled = bitcoinjs.script.decompile( script )
+                if ( !decompiled ) {
+                throw new Error( `Can not finalize input #${txindex}` )
+                }
+                //Step 2: Create final scripts
+                var stack_elements = [];
+                //add a dummy value because we are using multisig which pops one extra item off the stack – in segwit the dummy value must be zero i.e. null value i.e. empty string
+                stack_elements.push( '' );
+                var sig_order = [];
+                original_order_of_pubkeys.forEach( function( key ) {
+                    var i; for ( i=0; i<input.partialSig.length; i++ ) {
+                        if ( key == buffer.Buffer.from( input.partialSig[ i ].pubkey ).toString( "hex" ) ) {
+                            sig_order.push( i );
+                        }
+                    }
+                });
+                sig_order.forEach( function( item ) {
+                    stack_elements.push( input.partialSig[ item ].signature );
+                });
+                var witnessStack = bitcoinjs.payments.p2wsh({
+                    redeem: {
+                        output: script,
+                        input: bitcoinjs.script.compile( stack_elements ),
+                    }
+                });
+                return {
+                    finalScriptWitness: witnessStackToScriptWitness( witnessStack.witness )
+                }
+            }
+            psbt.finalizeInput( 0, getFinalScripts );
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        function generateLotteryWitnessScript( array_of_hashes_and_pubkeys ) {
+            return bitcoinjs.script.fromASM(
+                makeScript( array_of_hashes_and_pubkeys )
+                .trim()
+                .replace(/\s+/g, ' '),
+            );
+        }
+
+        function makeScript( array_of_hashes_and_pubkeys ) {
+
+          var num = array_of_hashes_and_pubkeys.length;
+
+          var scr = "";
+
+          var firstpart = `
+          OP_TOALTSTACK
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var secondpart = `
+          OP_DUP
+          OP_HASH160
+          ${ array_of_hashes_and_pubkeys[ 0 ][ 0 ] }
+          OP_EQUAL
+          OP_NOTIF
+              ${ bitcoinjs.script.number.encode( 31 ).toString( 'hex' ) }
+             OP_SWAP
+             OP_DROP
+          OP_ELSE
+          OP_SIZE
+          OP_DUP
+          OP_16
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var secondandahalfpart = `
+          OP_WITHIN
+          OP_VERIFY
+          OP_16
+          OP_SUB
+          OP_SWAP
+          OP_DROP
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var thirdpart = `
+          OP_FROMALTSTACK
+          OP_DUP
+          OP_HASH160
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var fourthpart = `
+          OP_EQUAL
+          OP_NOTIF
+             ${ bitcoinjs.script.number.encode( 31 ).toString( 'hex' ) }
+             OP_SWAP
+             OP_DROP
+          OP_ELSE
+          OP_SIZE
+          OP_DUP
+          OP_16
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var fifthpart = `
+          OP_WITHIN
+          OP_VERIFY
+          OP_16
+          OP_SUB
+          OP_SWAP
+          OP_DROP
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var sixthpart = `
+          OP_ADD
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var seventhpart = `
+          OP_DUP
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var eighthpart = `
+          OP_GREATERTHANOREQUAL
+          OP_IF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var ninthpart = `
+             OP_SUB
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var tenthpart = `
+          OP_DEPTH
+          OP_0
+          OP_GREATERTHAN
+          OP_IF
+          OP_DUP
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var eleventhpart = `
+          OP_EQUAL
+          OP_IF
+            OP_DROP
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var twelfthpart = `
+            OP_CHECKSIGVERIFY
+          OP_ENDIF
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var lastpart = `
+          OP_DEPTH
+          ${ "OP_" + ( num ).toString() }
+          OP_GREATERTHANOREQUAL
+          OP_IF
+            OP_16
+            OP_CHECKSEQUENCEVERIFY 
+            OP_2DROP
+         ${ "OP_" + ( num ).toString() }
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var lastpartsecondhalf = `
+            ${ "OP_" + ( num ).toString() }
+            OP_CHECKMULTISIG
+          OP_ELSE
+            OP_1
+          OP_ENDIF
+          `.replace( '\n', '' ).replace( / /g, '' );
+
+          var i; for ( i=0; i<num-1; i++ ) {
+            scr += firstpart;
+          }
+
+          var number = ( Number( 16 ) + Number( num ) ).toString();
+          scr += secondpart + `${ bitcoinjs.script.number.encode( number ).toString( 'hex' ) }\n` + secondandahalfpart;
+
+          var i; for ( i=1; i<num; i++ ) {
+                    var number = ( Number( 16 ) + Number( num ) ).toString();
+            scr += thirdpart + `${ array_of_hashes_and_pubkeys[ i ][ 0 ] }\n` + fourthpart + `${ bitcoinjs.script.number.encode( number ).toString( 'hex' ) }\n` + fifthpart;
+          }
+
+          var i; for ( i=0; i<num-1; i++ ) {
+            scr += sixthpart;
+          }
+
+          var i; for ( i=0; i<num-1; i++ ) {
+                    var number = num.toString();
+            scr += seventhpart + `${ "OP_" + ( number ).toString() }\n` + eighthpart + `${ "OP_" + ( number ).toString() }\n` + ninthpart;
+          }
+
+          var i; for ( i=0; i<num; i++ ) {
+                    var number = i.toString();
+            scr += tenthpart + `${ "OP_" + ( number ).toString() }\n` + eleventhpart + `${ array_of_hashes_and_pubkeys[ i ][ 1 ] }\n` + twelfthpart;
+          }
+
+          scr += lastpart;
+
+          var i; for ( i=0; i<num; i++ ) {
+            scr += `${ array_of_hashes_and_pubkeys[ i ][ 1 ] }\n`;
+          }
+
+          scr += lastpartsecondhalf;
+
+          return ( scr );
+
+        }
+
+        function receive( array_of_hashes_and_pubkeys ) {
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            return p2wsh.address;
+        }
+    </script>
+    <script>
+        function witnessStackToScriptWitness(witness) {
+          let buffer2 = buffer.Buffer.allocUnsafe(0);
+          function writeSlice(slice) {
+            buffer2 = buffer.Buffer.concat([buffer2, buffer.Buffer.from(slice)]);
+          }
+          function writeVarInt(i) {
+            const currentLen = buffer2.length;
+            const varintLen = varuintBitcoin.encodingLength(i);
+            buffer2 = buffer.Buffer.concat([buffer2, buffer.Buffer.allocUnsafe(varintLen)]);
+            varuintBitcoin.encode(i, buffer2, currentLen);
+          }
+          function writeVarSlice(slice) {
+            writeVarInt(slice.length);
+            writeSlice(slice);
+          }
+          function writeVector(vector) {
+            writeVarInt(vector.length);
+            vector.forEach(writeVarSlice);
+          }
+          writeVector(witness);
+          return buffer2;
+        }
+    </script>
+    <script>
+        function startFundingPSBT( bet_amount, players, privkey, lotteryAddress, mynum ) {
+            var num_of_players = players.length;
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            players.forEach( function( player ) {
+                psbt
+                .addInput({
+                    hash: player[ "utxo" ][ "txid" ],
+                    index: player[ "utxo" ][ "txindex" ],
+                    witnessUtxo: {
+                        script: buffer.Buffer.from( '0014' +
+                            bitcoinjs.crypto.hash160( buffer.Buffer.from( player[ "pubkey" ], 'hex' ) ).toString( 'hex' ),
+                            'hex' ),
+                        value: player[ "utxo" ][ "value" ]
+                    },
+                });
+            });
+            var new_quantity_of_sats_for_collateral_addresses = bet_amount * num_of_players * ( num_of_players - 1 );
+            var new_quantity_of_sats_for_lottery_address = bet_amount * num_of_players;
+            players.forEach( function( player ) {
+                psbt
+                .addOutput({
+                    address: player[ "collateral_address" ],
+                    value: new_quantity_of_sats_for_collateral_addresses,
+                });
+            });
+            psbt
+            .addOutput({
+                address: lotteryAddress,
+                value: new_quantity_of_sats_for_lottery_address,
+            });
+            psbt.signInput( mynum, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function getIdFromPSBT( psbthex ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            return bitcoinjs.Transaction.fromHex( psbt.data.getTransaction().toString( "hex" ) ).getId();
+        }
+    </script>
+    <script>
+        function cosignFundingPSBT( psbthex, privkey, mynum ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            psbt.signInput( mynum, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function finalizeFundingPSBT( psbthex ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            psbt.finalizeAllInputs();
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the collateral withdrawal uses a reasonable fee, not a hard coded 500 sats 
+        function startWithdrawingFromCollateralAddressAsMultisig( txid, txindex, array_of_pubkeys, array_of_addresses, hash, collateralPrivkey, theirkey, bet_amount ) {
+            var num_of_players = array_of_pubkeys.length;
+            var theirnum = 0;
+            array_of_pubkeys.forEach( function( key, index ) {
+                if ( key == theirkey ) {
+                    theirnum = index;
+                }
+            });
+            array_of_addresses.splice( theirnum, 1 );
+            var original_quantity_of_sats = bet_amount * num_of_players * ( num_of_players - 1 );
+            var total_fee = 500;
+            var quantity_of_sats_each_player_gets_out = Math.floor( bet_amount * num_of_players - ( 500 * ( 1 / ( num_of_players - 1 ) ) ) );
+            var witnessscript = generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum );
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, theirnum ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var scriptaddress = p2wsh.address;
+            var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
+
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                sequence: 8,
+                witnessScript: p2wsh.redeem.output,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0020' + bitcoinjs.crypto.sha256( buffer.Buffer.from( witnessscript, 'hex' ) ).toString( 'hex' ), 'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            array_of_addresses.forEach( function( address ) {
+                psbt
+                .addOutput({
+                    address: address,
+                    value: quantity_of_sats_each_player_gets_out,
+                });
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( collateralPrivkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the lottery withdrawal uses a reasonable fee, not a hard coded 500 sats 
+        function startWithdrawingFromLotteryAddressAsMultisig( txid, txindex, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, lotteryPrivkey ) {
+            var num_of_players = array_of_hashes_and_pubkeys.length;
+            var original_quantity_of_sats = bet_amount * num_of_players;
+            var total_fee = 500;
+            var quantity_of_sats_each_player_gets_out = Math.floor( original_quantity_of_sats * ( 1 / num_of_players ) ) - Math.ceil( total_fee * ( 1 / num_of_players ) );
+            var witnessscript = generateLotteryWitnessScript( array_of_hashes_and_pubkeys );
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var scriptaddress = p2wsh.address;
+            var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
+
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                sequence: 16,
+                witnessScript: p2wsh.redeem.output,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0020' + bitcoinjs.crypto.sha256( buffer.Buffer.from( witnessscript, 'hex' ) ).toString( 'hex' ), 'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            array_of_addresses.forEach( function( address ) {
+                psbt
+                .addOutput({
+                    address: address,
+                    value: quantity_of_sats_each_player_gets_out,
+                });
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( lotteryPrivkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function withdrawFromLotteryAddressAsMultisigPartners( psbthex, privkey ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkey, "hex" ) ) );
+            return psbt.toHex();
+        }
+    </script>
+    <script>
+        function withdrawFromLotteryAddressAsLastSigner( psbthex, original_order_of_pubkeys ) {
+            var psbt = bitcoinjs.Psbt.fromHex( psbthex );
+            var getFinalScripts = ( txindex, input, script) => {
+                //Step 1: Check to make sure the meaningful locking script matches what you expect.
+                var decompiled = bitcoinjs.script.decompile( script )
+                if ( !decompiled ) {
+                    throw new Error( `Can not finalize input #${txindex}` )
+                }
+
+                //Step 2: Create final scripts
+                var stack_elements = [];
+                //add a dummy value because we are using multisig which pops one extra item off the stack – in segwit the dummy value must be zero i.e. null value i.e. empty string
+                stack_elements.push( '' );
+                var sig_order = [];
+                original_order_of_pubkeys.forEach( function( key ) {
+                    var i; for ( i=0; i<input.partialSig.length; i++ ) {
+                        if ( key == buffer.Buffer.from( input.partialSig[ i ].pubkey ).toString( "hex" ) ) {
+                            sig_order.push( i );
+                        }
+                    }
+                });
+                sig_order.forEach( function( item ) {
+                    stack_elements.push( input.partialSig[ item ].signature );
+                });
+                original_order_of_pubkeys.forEach( function() {
+                    stack_elements.push( "" );
+                });
+                var witnessStack = bitcoinjs.payments.p2wsh({
+                    redeem: {
+                        output: script,
+                        input: bitcoinjs.script.compile( stack_elements ),
+                    }
+                });
+                return {
+                    finalScriptWitness: witnessStackToScriptWitness( witnessStack.witness )
+                }
+            }
+            psbt.finalizeInput( 0, getFinalScripts );
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the collateral withdrawal uses a reasonable fee, not a hard coded 500 sats 
+        function withdrawFromCollateralAddress( txid, txindex, useraddress, bet_amount, array_of_pubkeys, collateralPrivkey, preimage ) {
+            var num_of_players = array_of_pubkeys.length;
+            var mynum = txindex;
+            var collateralPubkey = getCompressedPubkeyHexFromPrivkeyHex( collateralPrivkey );
+            var hash = bitcoinjs.crypto.hash160( buffer.Buffer.from( preimage, "hex" ) ).toString( "hex" );
+            var original_quantity_of_sats = bet_amount * num_of_players * ( num_of_players - 1 );
+            var new_quantity_of_sats = original_quantity_of_sats - 500;
+            var witnessscript = generateCollateralWitnessScript( hash, array_of_pubkeys, mynum );
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateCollateralWitnessScript( hash, array_of_pubkeys, mynum ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var scriptaddress = p2wsh.address;
+            var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
+
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                witnessScript: p2wsh.redeem.output,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0020' + bitcoinjs.crypto.sha256( buffer.Buffer.from( witnessscript, 'hex' ) ).toString( 'hex' ), 'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            psbt
+            .addOutput({
+                address: useraddress,
+                value: new_quantity_of_sats,
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( collateralPrivkey, "hex" ) ) );
+
+            var getFinalScripts = ( txindex, input, script) => {
+                //Step 1: Check to make sure the meaningful locking script matches what you expect.
+                var decompiled = bitcoinjs.script.decompile( script )
+                if ( !decompiled ) {
+                    throw new Error( `Can not finalize input #${txindex}` )
+                }
+
+                //Step 2: Create final scripts
+                var stack_elements = [];
+                stack_elements.push( input.partialSig[0].signature );
+                stack_elements.push( buffer.Buffer.from( preimage, "hex" ) );
+                var witnessStack = bitcoinjs.payments.p2wsh({
+                    redeem: {
+                        output: script,
+                        input: bitcoinjs.script.compile( stack_elements ),
+                    }
+                });
+                return {
+                    finalScriptWitness: witnessStackToScriptWitness( witnessStack.witness )
+                }
+            }
+            psbt.finalizeInput( 0, getFinalScripts );
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the lottery withdrawal uses a reasonable fee, not a hard coded 500 sats 
+        function withdrawFromLotteryAddress( txid, txindex, bet_amount, useraddress, array_of_hashes_and_pubkeys, lotteryPrivkey, array_of_preimages ) {
+            var num_of_players = array_of_hashes_and_pubkeys.length;
+            var original_quantity_of_sats = bet_amount * num_of_players;
+            var fee_amount = 500;
+            var new_quantity_of_sats = original_quantity_of_sats - fee_amount;
+            var witnessscript = generateLotteryWitnessScript( array_of_hashes_and_pubkeys );
+            var p2wsh = bitcoinjs.payments.p2wsh({redeem: {output: generateLotteryWitnessScript( array_of_hashes_and_pubkeys ), network: bitcoinjs.networks.mainnet}, network: bitcoinjs.networks.mainnet });
+            var scriptaddress = p2wsh.address;
+            var outputscript = "00" + bitcoinjs.crypto.sha256( witnessscript ).toString('hex');
+
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                witnessScript: p2wsh.redeem.output,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0020' + bitcoinjs.crypto.sha256( buffer.Buffer.from( witnessscript, 'hex' ) ).toString( 'hex' ), 'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            psbt
+            .addOutput({
+                address: useraddress,
+                value: new_quantity_of_sats,
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( lotteryPrivkey, "hex" ) ) );
+
+            var getFinalScripts = ( txindex, input, script) => {
+                //Step 1: Check to make sure the meaningful locking script matches what you expect.
+                var decompiled = bitcoinjs.script.decompile( script )
+                if ( !decompiled ) {
+                throw new Error( `Can not finalize input #${txindex}` )
+                }
+
+                //Step 2: Create final scripts
+                var stack_elements = [];
+                stack_elements.push( input.partialSig[0].signature );
+                var i; for ( i=0; i<array_of_preimages.length; i++ ) {
+                    stack_elements.push( buffer.Buffer.from( array_of_preimages[ i ], "hex" ) );
+                }
+                var witnessStack = bitcoinjs.payments.p2wsh({
+                    redeem: {
+                        output: script,
+                        input: bitcoinjs.script.compile( stack_elements ),
+                    }
+                });
+                return {
+                    finalScriptWitness: witnessStackToScriptWitness( witnessStack.witness )
+                }
+            }
+            psbt.finalizeInput( 0, getFinalScripts );
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        //todo: make sure the abort transaction uses a reasonable fee, not a hard coded 500 sats
+        function abortLottery( txid, txindex, bet_amount, useraddress, privkey, pubkey, num_of_players ) {
+            var original_quantity_of_sats = ( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + bet_amount + 500;
+            var fee_amount = 500;
+            var new_quantity_of_sats = original_quantity_of_sats - fee_amount;
+            var psbt = new bitcoinjs.Psbt({network: bitcoinjs.networks.mainnet});
+            psbt
+            .addInput({
+                hash: txid,
+                index: txindex,
+                witnessUtxo: {
+                    script: buffer.Buffer.from( '0014' +
+                        bitcoinjs.crypto.hash160( buffer.Buffer.from( pubkey, 'hex' ) ).toString( 'hex' ),
+                        'hex' ),
+                    value: original_quantity_of_sats
+                },
+            });
+            psbt
+            .addOutput({
+                address: useraddress,
+                value: new_quantity_of_sats,
+            });
+            psbt.signInput( 0, bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkey, "hex" ) ) );
+            psbt.finalizeAllInputs();
+            return psbt.extractTransaction().toHex();
+        }
+    </script>
+    <script>
+        async function prepareLotteryAddress( e ) {
+            var session = JSON.parse( e.currentTarget.getAttribute( "data-session" ) );
+            var bet_amount = Number( e.currentTarget.getAttribute( "data-bet_amount" ) );
+            var privkey = e.currentTarget.getAttribute( "data-privkey" );
+            var pubkey = e.currentTarget.getAttribute( "data-pubkey" );
+            var preimage = e.currentTarget.getAttribute( "data-preimage" );
+            var winnings_address = e.currentTarget.getAttribute( "data-winnings_address" );
+            var deposit_minimum = Number( e.currentTarget.getAttribute( "data-deposit_minimum" ) );
+            var counterparty_info = JSON.parse( document.getElementById( "counterparty" ).value );
+            var players = [];
+            players.push( session );
+            counterparty_info.forEach( function( info ) {
+                players.push( info );
+            });
+            players.sort( function( a, b ) {if ( firstPubkeyIsBigger( a[ "pubkey" ], b[ "pubkey" ] ) ) {return 1;} else {return -1;}});
+            players.forEach( async function( player, index ) {
+                var txid = player[ "utxo" ][ "txid" ];
+                var txindex = player[ "utxo" ][ "txindex" ];
+                var url = "https://mutinynet.com/api/tx/" + txid;
+                var tx = await getData( url );
+                var tx = JSON.parse( tx );
+                if ( tx[ "vout" ][ txindex ][ "value" ] < deposit_minimum ) {
+                    var abort_message = "One of your counterparties did not deposit enough money into their deposit address. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                    return;
+                }
+            });
+            var pubkeys = [];
+            var array_of_hashes_and_pubkeys = [];
+            var array_of_hashes = [];
+            var array_of_addresses = [];
+            players.forEach( function( player ) {
+                pubkeys.push( player[ "pubkey" ] );
+                var array = [];
+                array.push( player[ "numhash" ], player[ "pubkey" ] );
+                array_of_hashes_and_pubkeys.push( array );
+                array_of_addresses.push( player[ "winnings_address" ] );
+                array_of_hashes.push( player[ "numhash" ] );
+            });
+            players.forEach( function( player, index ) {
+                player[ "collateral_address" ] = collateral( player[ "numhash" ], pubkeys, index );
+                listenForCollateralDeposit( player[ "collateral_address" ], player[ "numhash" ], preimage, players );
+            });
+            var array_of_pubkeys = pubkeys;
+            var array_of_addresses_for_lottery_address = btoa( JSON.stringify( array_of_addresses ) );
+            var lotteryAddress = receive( array_of_hashes_and_pubkeys );
+            var mynum = 0;
+            array_of_pubkeys.forEach( function( key, index ) {
+                if ( key == pubkey ) {
+                    mynum = index;
+                }
+            });
+            //todo: make sure the funding psbt uses a reasonable fee, not a hard coded 500 sats 
+            var funding_psbt = startFundingPSBT( bet_amount, players, privkey, lotteryAddress, mynum );
+            var funding_txid = getIdFromPSBT( funding_psbt );
+            console.log( "the funding psbt:", funding_psbt );
+            sessionStorage[ "time_when_i_started_waiting_for_withdrawal_transactions" ] = String( Math.floor( Date.now() / 1000 ) );
+            var pswts = await cosignWithdrawalTransactions( funding_txid, array_of_pubkeys, array_of_addresses, players, privkey, bet_amount, mynum );
+            console.log( "fully signed pswts:" );
+            console.log( JSON.stringify( pswts ) );
+            var fully_signed_collateral_withdrawal_transactions = [];
+            pswts.forEach( function( pswt ) {
+                var collateral_withdrawal_tx = withdrawFromCollateralAddressAsLastSigner( pswt, array_of_pubkeys );
+                fully_signed_collateral_withdrawal_transactions.push( collateral_withdrawal_tx );
+            });
+            console.log( "fully signed collateral withdrawal transactions:" );
+            console.log( JSON.stringify( fully_signed_collateral_withdrawal_transactions ) );
+            sessionStorage[ "fully_signed_collateral_withdrawal_transactions" ] = JSON.stringify( fully_signed_collateral_withdrawal_transactions );
+            document.getElementById( "progressBar" ).style.width = "45%";
+            document.getElementById( "current_status" ).innerText = "preparing lottery address";
+            sessionStorage[ "time_when_i_started_waiting_for_the_lottery_transaction" ] = String( Math.floor( Date.now() / 1000 ) );
+            var fully_signed_lottery_withdrawal_transaction = await cosignLotteryTransaction( funding_txid, players.length, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses_for_lottery_address, privkey, players, mynum );
+            console.log( "fully signed pslt:" );
+            console.log( fully_signed_lottery_withdrawal_transaction );
+            var fully_signed_pslt_tx = withdrawFromLotteryAddressAsLastSigner( fully_signed_lottery_withdrawal_transaction, array_of_pubkeys );
+            console.log( "fully signed pslt tx:" );
+            console.log( fully_signed_pslt_tx );
+            sessionStorage[ "fully_signed_pslt_tx" ] = fully_signed_pslt_tx;
+            console.log( "time to fund the transaction! You've got all the signed things" );
+            document.getElementById( "progressBar" ).style.width = "55%";
+            document.getElementById( "current_status" ).innerText = "preparing funding transaction";
+            sessionStorage[ "time_when_i_started_waiting_for_the_funding_transaction" ] = String( Math.floor( Date.now() / 1000 ) );
+            var fully_signed_psft = await cosignPSBT( funding_psbt, privkey, mynum, players );
+            if ( mynum == players.length - 1 ) {
+                var timeout = await waitSomeSeconds( players.length + 1 );
+            }
+            console.log( "fully signed psft:" );
+            console.log( fully_signed_psft );
+            var fully_signed_psft_tx = finalizeFundingPSBT( fully_signed_psft );
+            sessionStorage[ "fully_signed_psft_tx" ] = fully_signed_psft_tx;
+            console.log( "fully signed funding tx:" );
+            console.log( fully_signed_psft_tx );
+            pushBTCpmt( fully_signed_psft_tx, "psft" );
+            document.getElementById( "abort_button" ).parentElement.remove();
+            document.getElementById( "progressBar" ).style.width = "65%";
+            document.getElementById( "current_status" ).innerText = "preparing punishments for anyone who tries to cheat";
+            setTimeout( function() {punishCheaters( fully_signed_psft );}, 3000 );
+            var collateral_withdrawal_tx = withdrawFromCollateralAddress( funding_txid, mynum, winnings_address, bet_amount, array_of_pubkeys, privkey, preimage );
+            console.log( "after you broadcast the funding tx, decide whether to wait for it to confirm (recommended) or trust your counterparties not to doublespend its inputs (not recommended). If you decide not to wait, is also time to broadcast the collateral withdrawal tx:" );
+            console.log( collateral_withdrawal_tx );
+            var i_should_wait_to_withdraw_my_collateral = confirm( "The lottery funding transaction was broadcasted but one or more of your counterparties can doublespend its inputs because it isn't in a block yet. If you want to wait for it confirm (recommended), click OK. If you trust your counterparty or counterparties and you all agree to go the trusted fast-route where you don't wait for the funding transaction to confirm, click cancel (not recommended)." );
+            if ( i_should_wait_to_withdraw_my_collateral ) {
+                sessionStorage[ "wait_state" ] = "waiting";
+                document.getElementById( "progressBar" ).style.width = "70%";
+                document.getElementById( "current_status" ).innerHTML = `awaiting confirmation of this transaction: <a href="https://mutinynet.com/tx/${getIdFromPSBT( fully_signed_psft )}" target="_blank">${getIdFromPSBT( fully_signed_psft )}</a>`;
+                if ( sessionStorage[ "psbt" ] ) {
+                    sessionStorage[ "fully_signed_psbt" ] = sessionStorage[ "psbt" ];
+                }
+                if ( sessionStorage[ "fully_signed_psbt" ] ) {
+                    sessionStorage[ "psbt" ] = sessionStorage[ "fully_signed_psbt" ];
+                }
+                console.log( "waiting for the funding tx to get confirmed. Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
+                var txIsSufficientlyConfirmed = await waitForConfs( getIdFromPSBT( fully_signed_psft ), 1 );
+                sessionStorage[ "wait_state" ] = "done";
+                console.log( "yay, the funding tx got confirmed! Here is its txid:", getIdFromPSBT( fully_signed_psft ) );
+            } else {
+                sessionStorage[ "wait_state" ] = "skipping";
+            }
+            document.getElementById( "progressBar" ).style.width = "75%";
+            document.getElementById( "current_status" ).innerText = "withdrawing your collateral & waiting for your opponents";
+            sessionStorage[ "time_when_i_started_waiting_for_collateral_withdrawals" ] = String( Math.floor( Date.now() / 1000 ) );
+            pushBTCpmt( collateral_withdrawal_tx );
+            console.log( `oh yeah and if you won, remember to run this: withdrawFromLotteryAddress( "${funding_txid}", ${String(players.length )}, ${String( bet_amount )}, "${winnings_address}", ${JSON.stringify( array_of_hashes_and_pubkeys )}, "${privkey}", array_of_preimages )` );
+            var other_addresses = [];
+            var other_hashes = [];
+            players.forEach( function( player, index ) {
+                if ( index != mynum ) {
+                    other_addresses.push( player[ "collateral_address" ] );
+                    other_hashes.push( player[ "numhash" ] );
+                }
+            });
+            var info_for_withdrawing_from_lottery_address_as_winner = {}
+            info_for_withdrawing_from_lottery_address_as_winner[ "funding_txid" ] = funding_txid;
+            info_for_withdrawing_from_lottery_address_as_winner[ "num_of_players" ] = players.length;
+            info_for_withdrawing_from_lottery_address_as_winner[ "bet_amount" ] = bet_amount;
+            info_for_withdrawing_from_lottery_address_as_winner[ "winnings_address" ] = winnings_address;
+            info_for_withdrawing_from_lottery_address_as_winner[ "array_of_hashes_and_pubkeys" ] = array_of_hashes_and_pubkeys;
+            info_for_withdrawing_from_lottery_address_as_winner[ "privkey" ] = privkey;
+            info_for_withdrawing_from_lottery_address_as_winner = JSON.stringify( info_for_withdrawing_from_lottery_address_as_winner );
+            info_for_withdrawing_from_lottery_address_as_winner = btoa( info_for_withdrawing_from_lottery_address_as_winner );
+            var rosterOfPreimagesIsFull = await waitForFullRosterOfPreimages( preimage, array_of_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+        }
+    </script>
+    <script>
+        sessionStorage.clear();
+        sessionStorage[ "pswts" ] = "";
+        sessionStorage[ "fully_signed_pswts" ] = "";
+        sessionStorage[ "pslt" ] = "";
+        sessionStorage[ "fully_signed_pslt" ] = "";
+        sessionStorage[ "psbt" ] = "";
+        sessionStorage[ "fully_signed_psbt" ] = "";
+        async function getNote( item ) {
+          async function isNoteSetYet( note_i_seek ) {
+            return new Promise( function( resolve, reject ) {
+              if ( note_i_seek == "" ) {
+                setTimeout( async function() {
+                  var msg = await isNoteSetYet( sessionStorage[ item ] );
+                  resolve( msg );
+                }, 100 );
+              } else {
+                resolve( note_i_seek );
+              }
+            });
+          }
+          async function getTimeoutData() {
+            var note_i_seek = await isNoteSetYet( sessionStorage[ item ] );
+            return note_i_seek;
+          }
+          var returnable = await getTimeoutData();
+          return returnable;
+        }
+    </script>
+    <script>
+        async function listenForCollateralDeposit( address, hash, mypreimage, players ) {
+            var moneyArrived = await waitForMoneyToArriveInAddress( address );
+            if ( !moneyArrived ) return;
+            var moneyWasSpent = await waitForMoneyToLeaveAddress( address );
+            var preimage = await preimageLooper( address, hash );
+            if ( !sessionStorage[ "roster_of_preimages" ] || sessionStorage[ "roster_of_preimages" ] == "" ) {
+                var roster_of_preimages = [];
+                roster_of_preimages.push( mypreimage );
+                if ( !roster_of_preimages.includes( preimage ) ) {
+                    roster_of_preimages.push( preimage );
+                }
+                sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
+            } else {
+                var roster_of_preimages = JSON.parse( sessionStorage[ "roster_of_preimages" ] );
+                if ( !roster_of_preimages.includes( preimage ) ) {
+                    roster_of_preimages.push( preimage );
+                }
+                sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
+            }
+        }
+    </script>
+    <script>
+        async function punishCheaters( psft ) {
+            var timeToPunishHasArrived = await waitForConfs( getIdFromPSBT( psft ), 8 );
+            var fully_signed_collateral_withdrawal_transactions = JSON.parse( sessionStorage[ "fully_signed_collateral_withdrawal_transactions" ] );
+            fully_signed_collateral_withdrawal_transactions.forEach( function( tx, index ) {
+                num_of_seconds = ( index + 1 ) * 3000;
+                setTimeout( function() {pushBTCpmt( tx, "justice" );}, num_of_seconds );
+            });
+            var timeForReimbursementHasArrived = await waitForConfs( getIdFromPSBT( psft ), 16 );
+            pushBTCpmt( sessionStorage[ "fully_signed_pslt_tx" ], "reimbursement" );
+        }
+    </script>
+    <script>
+        async function cosignWithdrawalTransactions( funding_txid, pubkeys, array_of_addresses, players, privkey, bet_amount, mynum ) {
+            var collateral_withdrawal_transactions = [];
+            var collateral_withdrawal_txids = [];
+            players.forEach( function( player, index ) {
+                var withdrawaltx = startWithdrawingFromCollateralAddressAsMultisig( funding_txid, index, pubkeys, array_of_addresses, player[ "numhash" ], privkey, player[ "pubkey" ], bet_amount );
+                collateral_withdrawal_transactions.push( withdrawaltx );
+                collateral_withdrawal_txids.push( getIdFromPSBT( withdrawaltx ) );
+            });
+            var all_pubkeys = [];
+            players.forEach( function( player, index ) {
+                all_pubkeys.push( players[ index ][ "pubkey" ] );
+            });
+            if ( mynum == 0 ) {
+                //create and sign the pswts as the first signer and then pass them upward to the next key
+                console.log( "collateral withdrawal transactions with first signature:" );
+                console.log( JSON.stringify( collateral_withdrawal_transactions ) );
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid pswts";
+                sendable[ "mid_pswts" ] = JSON.stringify( collateral_withdrawal_transactions );
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                document.getElementById( "progressBar" ).style.width = "40%";
+                document.getElementById( "current_status" ).innerText = "waiting for opponents' signatures";
+                var fully_signed_pswts = await getNote( "fully_signed_pswts" );
+                fully_signed_pswts = JSON.parse( fully_signed_pswts );
+                fully_signed_pswts.forEach( function( withdrawal_psbt ) {
+                    var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
+                    all_pubkeys.forEach( function( key ) {
+                        if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                            var abort_message = "One or more of your counterparties tried to make you believe a transaction was signed by everyone when it actually wasn't. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                            pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                            return;
+                        } else {
+                            console.log( "yay! The input has key", key );
+                        }
+                    });
+                    var i_should_continue = false;
+                    var id_of_tx_they_want_me_to_sign = getIdFromPSBT( withdrawal_psbt );
+                    console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                    console.log( "collateral_withdrawal_txids:", JSON.stringify( collateral_withdrawal_txids ) );
+                    if ( collateral_withdrawal_txids.includes( id_of_tx_they_want_me_to_sign ) ) {
+                        console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                        i_should_continue = true;
+                    }
+                    if ( !i_should_continue ) {
+                        var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                        return;
+                    }
+                });
+                return fully_signed_pswts;
+            }
+            if ( mynum > 0 ) {
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkeys_below_me = [];
+                players.forEach( function( player, index ) {
+                    if ( index < mynum ) {
+                        pubkeys_below_me.push( players[ index ][ "pubkey" ] );
+                    }
+                });
+                console.log( "pubkeys below me:", JSON.stringify( pubkeys_below_me ) );
+                var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "pswts" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
+                var pswts = await getNote( "pswts" );
+                pswts = JSON.parse( pswts );
+                new_pswts = [];
+                pswts.forEach( function( withdrawal_psbt ) {
+                    var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
+                    pubkeys_below_me.forEach( function( key ) {
+                        if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                            var abort_message = "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                            pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                            return;
+                        } else {
+                            console.log( "yay! The input has key", key );
+                        }
+                    });
+                    var i_should_continue = false;
+                    var id_of_tx_they_want_me_to_sign = getIdFromPSBT( withdrawal_psbt );
+                    console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                    console.log( "collateral_withdrawal_txids:", JSON.stringify( collateral_withdrawal_txids ) );
+                    if ( collateral_withdrawal_txids.includes( id_of_tx_they_want_me_to_sign ) ) {
+                        console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                        i_should_continue = true;
+                    }
+                    if ( !i_should_continue ) {
+                        var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                        return;
+                    }
+                    new_pswt = withdrawFromCollateralAddressAsMultisigPartners( withdrawal_psbt, privkey );
+                    new_pswts.push( new_pswt );
+                });
+            }
+            if ( mynum > 0 && mynum < pubkeys.length - 1 ) {
+                console.log( "pswts with your signature:" );
+                console.log( JSON.stringify( new_pswts ) );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid pswts";
+                sendable[ "mid_pswts" ] = JSON.stringify( new_pswts );
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
+                document.getElementById( "progressBar" ).style.width = "40%";
+                document.getElementById( "current_status" ).innerText = "waiting for opponents' signatures";
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_pswts" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var fully_signed_pswts = await getNote( "fully_signed_pswts" );
+                fully_signed_pswts = JSON.parse( fully_signed_pswts );
+                fully_signed_pswts.forEach( function( withdrawal_psbt ) {
+                    var psbt = bitcoinjs.Psbt.fromHex( withdrawal_psbt );
+                    all_pubkeys.forEach( function( key ) {
+                        if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                            var abort_message = "One or more of your counterparties tried to make you believe a transaction was signed by everyone when it actually wasn't. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                            pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                            return;
+                        } else {
+                            console.log( "yay! The input has key", key );
+                        }
+                    });
+                    var i_should_continue = false;
+                    var id_of_tx_they_want_me_to_sign = getIdFromPSBT( withdrawal_psbt );
+                    console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                    console.log( "collateral_withdrawal_txids:", JSON.stringify( collateral_withdrawal_txids ) );
+                    if ( collateral_withdrawal_txids.includes( id_of_tx_they_want_me_to_sign ) ) {
+                        console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                        i_should_continue = true;
+                    }
+                    if ( !i_should_continue ) {
+                        var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                        return;
+                    }
+                });
+                return fully_signed_pswts;
+            }
+            if ( mynum == pubkeys.length - 1 ) {
+                document.getElementById( "progressBar" ).style.width = "40%";
+                document.getElementById( "current_status" ).innerText = "waiting for opponents' signatures";
+                //wait for some pswts from the signer below me, validate and sign them, then send the fully signed pswts to every other key
+                console.log( "remember to send the following pswts to everyone else" );
+                var sendable = {}
+                sendable[ "msg_type" ] = "finalized pswts";
+                sendable[ "finalized_pswts" ] = JSON.stringify( new_pswts );
+                var player_pubkeys = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    player_pubkeys.push( document.getElementsByClassName( "player_pubkey" )[ i ].value );
+                }
+                player_pubkeys.forEach( function( pubkey, index ) {
+                    num_of_seconds = ( index + 1 ) * 1000;
+                    setTimeout( function() {sendDM( JSON.stringify( sendable ), pubkey );}, num_of_seconds );
+                });
+                return new_pswts;
+            }
+        }
+    </script>
+    <script>
+        async function cosignLotteryTransaction( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey, players, mynum ) {
+            var all_pubkeys = [];
+            players.forEach( function( player, index ) {
+                all_pubkeys.push( players[ index ][ "pubkey" ] );
+            });
+            var array_of_addresses = JSON.parse( atob( array_of_addresses ) );
+            if ( mynum == 0 ) {
+                //create and sign the pslt as the first signer and then pass it upward to the next key
+                var pslt = startWithdrawingFromLotteryAddressAsMultisig( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey );
+                var expected_pslt_txid = getIdFromPSBT( pslt );
+                console.log( "pslt with first signature:" );
+                console.log( pslt );
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid pslt";
+                sendable[ "mid_pslt" ] = pslt;
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                document.getElementById( "progressBar" ).style.width = "50%";
+                document.getElementById( "current_status" ).innerText = "waiting for more signatures from your opponents";
+                var fully_signed_pslt = await getNote( "fully_signed_pslt" );
+                var psbt = bitcoinjs.Psbt.fromHex( fully_signed_pslt );
+                all_pubkeys.forEach( function( key ) {
+                    if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                        var abort_message = "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( fully_signed_pslt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_pslt_txid );
+                if ( expected_pslt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                    return;
+                }
+                return fully_signed_pslt;
+            }
+            if ( mynum > 0 ) {
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkeys_below_me = [];
+                players.forEach( function( player, index ) {
+                    if ( index < mynum ) {
+                        pubkeys_below_me.push( players[ index ][ "pubkey" ] );
+                    }
+                });
+                var expected_pslt = startWithdrawingFromLotteryAddressAsMultisig( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey );
+                var expected_pslt_txid = getIdFromPSBT( expected_pslt );
+                var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "pslt" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
+                var pslt = await getNote( "pslt" );
+                var psbt = bitcoinjs.Psbt.fromHex( pslt );
+                pubkeys_below_me.forEach( function( key ) {
+                    if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                        var abort_message = "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( pslt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_pslt_txid );
+                if ( expected_pslt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                    return;
+                }
+                var new_pslt = withdrawFromLotteryAddressAsMultisigPartners( pslt, privkey );
+            }
+            if ( mynum > 0 && mynum < players.length - 1 ) {
+                console.log( "pslt with your signature:" );
+                console.log( new_pslt );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid pslt";
+                sendable[ "mid_pslt" ] = new_pslt;
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_pslt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                document.getElementById( "progressBar" ).style.width = "50%";
+                document.getElementById( "current_status" ).innerText = "waiting for more signatures from your opponents";
+                var fully_signed_pslt = await getNote( "fully_signed_pslt" );
+                var expected_pslt = startWithdrawingFromLotteryAddressAsMultisig( funding_txid, num_of_players, bet_amount, array_of_hashes_and_pubkeys, array_of_addresses, privkey );
+                var expected_pslt_txid = getIdFromPSBT( expected_pslt );
+                var psbt = bitcoinjs.Psbt.fromHex( fully_signed_pslt );
+                all_pubkeys.forEach( function( key ) {
+                    if ( !psbt.inputHasPubkey( 0, buffer.Buffer.from( key, "hex" ) ) ) {
+                        var abort_message = "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( fully_signed_pslt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_pslt_txid );
+                if ( expected_pslt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                    return;
+                }
+                return fully_signed_pslt;
+            }
+            if ( mynum == players.length - 1 ) {
+                //wait for a pslt from the signer below me, validate and sign it, then send the fully signed pslt to every other key
+                document.getElementById( "progressBar" ).style.width = "50%";
+                document.getElementById( "current_status" ).innerText = "waiting for more signatures from your opponents";
+                console.log( "remember to send the following pslt to everyone else" );
+                var sendable = {}
+                sendable[ "msg_type" ] = "finalized pslt";
+                sendable[ "finalized_pslt" ] = new_pslt;
+                var player_pubkeys = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    player_pubkeys.push( document.getElementsByClassName( "player_pubkey" )[ i ].value );
+                }
+                player_pubkeys.forEach( function( pubkey, index ) {
+                    num_of_seconds = ( index + 1 ) * 1000;
+                    setTimeout( function() {sendDM( JSON.stringify( sendable ), pubkey );}, num_of_seconds );
+                });
+                return new_pslt;
+            }
+        }
+    </script>
+    <script>
+        async function cosignPSBT( psbthex, privkey, mynum, players ) {
+            var all_pubkeys = [];
+            players.forEach( function( player, index ) {
+                all_pubkeys.push( players[ index ][ "pubkey" ] );
+            });
+            if ( mynum == 0 ) {
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid psft";
+                sendable[ "mid_psft" ] = psbthex;
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                var expected_psbt = psbthex;
+                var expected_psbt_txid = getIdFromPSBT( expected_psbt );
+                document.getElementById( "progressBar" ).style.width = "60%";
+                document.getElementById( "current_status" ).innerText = "waiting for yet more signatures from your opponents";
+                var fully_signed_psbt = await getNote( "fully_signed_psbt" );
+                var decoded_psbt = bitcoinjs.Psbt.fromHex( fully_signed_psbt );
+                all_pubkeys.forEach( function( key, index ) {
+                    if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "One or more of your counterparties tried to make you sign a transaction that they did not sign. Your funds were withdrawn for your safety, you should see them in your wallet soon." );
+                        window.location.reload();
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( fully_signed_psbt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_psbt_txid );
+                if ( expected_psbt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                    return;
+                }
+                return fully_signed_psbt;
+            }
+            if ( mynum > 0 ) {
+                console.log( "your pubkey is: " + players[ mynum ][ "pubkey" ] );
+                var pubkeys_below_me = [];
+                players.forEach( function( player, index ) {
+                    if ( index < mynum ) {
+                        pubkeys_below_me.push( players[ index ][ "pubkey" ] );
+                    }
+                });
+                var expected_psbt = psbthex;
+                var expected_psbt_txid = getIdFromPSBT( expected_psbt );
+                var pubkey_below_me = players[ mynum - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "psbt" ] the info provided to you by the person with this pubkey: ` + pubkey_below_me );
+                var psbt = await getNote( "psbt" );
+                var decoded_psbt = bitcoinjs.Psbt.fromHex( psbt );
+                pubkeys_below_me.forEach( function( key, index ) {
+                    if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
+                        var abort_message = "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( psbt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_psbt_txid );
+                if ( expected_psbt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                    return;
+                }
+                var new_psbt = cosignFundingPSBT( psbt, privkey, mynum );
+            }
+            if ( mynum > 0 && mynum < players.length - 1 ) {
+                console.log( "psbt with your signature:" );
+                console.log( new_psbt );
+                var pubkey_above_me = players[ mynum + 1 ][ "pubkey" ];
+                var nostr_key_above_me = document.querySelector( `[ data-in_game_pubkey="${pubkey_above_me}" ]` ).value;
+                var sendable = {}
+                sendable[ "msg_type" ] = "mid psft";
+                sendable[ "mid_psft" ] = new_psbt;
+                sendDM( JSON.stringify( sendable ), nostr_key_above_me );
+                var highest_pubkey = players[ players.length - 1 ][ "pubkey" ];
+                console.log( `paste into sessionStorage[ "fully_signed_psbt" ] the info provided to you by the person with the highest pubkey, i.e. this one: ` + highest_pubkey );
+                document.getElementById( "progressBar" ).style.width = "60%";
+                document.getElementById( "current_status" ).innerText = "waiting for yet more signatures from your opponents";
+                var fully_signed_psbt = await getNote( "fully_signed_psbt" );
+                var decoded_psbt = bitcoinjs.Psbt.fromHex( fully_signed_psbt );
+                all_pubkeys.forEach( function( key, index ) {
+                    if ( !decoded_psbt.inputHasPubkey( index, buffer.Buffer.from( key, "hex" ) ) ) {
+                        var abort_message = "One or more of your counterparties tried to make you sign a transaction that they did not sign. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                        return;
+                    } else {
+                        console.log( "yay! The input has key", key );
+                    }
+                });
+                var i_should_continue = false;
+                var id_of_tx_they_want_me_to_sign = getIdFromPSBT( fully_signed_psbt );
+                console.log( "id_of_tx_they_want_me_to_sign:", id_of_tx_they_want_me_to_sign );
+                console.log( "expected_pslt_txid:", expected_psbt_txid );
+                if ( expected_psbt_txid == id_of_tx_they_want_me_to_sign ) {
+                    console.log( "yay! The transaction your counterparty or counterparties want you to sign has the right inputs and outputs." );
+                    i_should_continue = true;
+                }
+                if ( !i_should_continue ) {
+                    var abort_message = "One of your counterparties tried to make you sign a transaction that is not part of the lottery contract. Aborting. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                    return;
+                }
+                return fully_signed_psbt;
+            }
+            if ( mynum == players.length - 1 ) {
+                document.getElementById( "progressBar" ).style.width = "60%";
+                document.getElementById( "current_status" ).innerText = "waiting for yet more signatures from your opponents";
+                console.log( "remember to send the following psbt to everyone else" );
+                var sendable = {}
+                sendable[ "msg_type" ] = "finalized psft";
+                sendable[ "finalized_psft" ] = new_psbt;
+                var player_pubkeys = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    player_pubkeys.push( document.getElementsByClassName( "player_pubkey" )[ i ].value );
+                }
+                player_pubkeys.forEach( function( pubkey, index ) {
+                    num_of_seconds = ( index + 1 ) * 1000;
+                    setTimeout( function() {sendDM( JSON.stringify( sendable ), pubkey );}, num_of_seconds );
+                });
+                return new_psbt;
+            }
+        }
+    </script>
+    <script>
+        function getCompressedPubkeyHexFromPrivkeyHex( privkeyhex ) {
+            return bitcoinjs.ECPair.fromPrivateKey( buffer.Buffer.from( privkeyhex, "hex" ), { network: bitcoinjs.networks.mainnet } ).publicKey.toString( "hex" );
+        }
+    </script>
+    <script>
+        function createQR( content ) {
+            var dataUriPngImage = document.createElement( "img" ),
+            s = QRCode.generatePNG( content, {
+                ecclevel: 'M',
+                format: 'html',
+                fillcolor: '#FFFFFF',
+                textcolor: '#000000',
+                margin: 4,
+                modulesize: 8,
+            });
+            dataUriPngImage.src = s;
+            dataUriPngImage.id = "qr_code";
+            return dataUriPngImage;
+        }
+    </script>
+    <script>
+        function getData( url ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        resolve( xhttp.responseText );
+                    };
+                }
+                xhttp.open( "GET", url, true );
+                xhttp.send();
+            });
+        }
+    </script>
+    <script>
+        function getTransactionsInvolvingAddress( address ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        var txs = [];
+                        var i; for ( i=0; i<json.length; i++ ) {
+                            txs.push( json[ i ][ "txid" ] );
+                        }
+                        resolve( JSON.stringify( txs ) );
+                    }
+                };
+                xhttp.open("GET", "https://mutinynet.com/api/address/" + address + "/txs", true);
+                xhttp.send();
+            });                
+        }
+
+        function waitSomeSeconds( num ) {
+          var num = num.toString() + "000";
+          num = Number( num );
+          return new Promise( function( resolve, reject ) {
+            setTimeout( function() { resolve( "" ); }, num );
+          });
+        }
+
+        function takeTxsAndGetPreimageFromThem( txs, hash ) {
+            return new Promise( async function( resolve, reject ) {
+                if ( txs.length > 1 ) {
+                    if ( document.getElementById( "current_status" ).innerText != "preparing punishments for anyone who tries to cheat" && document.getElementById( "current_status" ).innerText != "game is done" && sessionStorage[ "wait_state" ] && ( sessionStorage[ "wait_state" ] == "skipping" || sessionStorage[ "wait_state" ] == "done" ) ) {
+                        document.getElementById( "progressBar" ).style.width = "80%";
+                        document.getElementById( "current_status" ).innerText = "getting your opponents' random numbers from the blockchain";
+                    }
+                    console.log( "here comes the ten second timeout -- I wait ten seconds because sometimes esplora knows a txid is associated with an address (so that check returns true) but it has not parsed and stored all the info for that txid yet, so I need to give it a bit of time to do that" );
+                    var timeout = await waitSomeSeconds( 10 );
+                    console.log( "ok the ten second timeout is done, let's continue" );
+                    txs.forEach( async function( tx ) {
+                        console.log( tx );
+                        var possible_preimage = await getPreimageFromTransactionThatSpendsAnHTLC( tx, hash );
+                        if ( possible_preimage && possible_preimage != "" && possible_preimage.length > 1 ) {
+                            var preimage = possible_preimage
+                            console.log( "this is the preimage I got:", preimage );
+                            resolve( preimage );
+                        }
+                    });
+                } else {
+                    resolve( "" );
+                }
+            });
+        }
+
+        async function getSweepablePreimageFromAllPossibilities( address, hash ) {
+            return new Promise( async function( resolve, reject ) {
+                var txs = await getTransactionsInvolvingAddress( address );
+                var txs = JSON.parse( txs );
+                txs.reverse();
+                var preimage = "";
+                console.log( "Ok I am trying to get the preimage for this hash:", hash );
+                console.log( "I will search for it in all transactions associated with the address provided, and if that set is currently empty (or if I don't get what I want), I will just rerun this script again in a bit -- that's what preimageLooper does" );
+                preimage += await takeTxsAndGetPreimageFromThem( txs, hash );
+                console.log( "the preimage I will return is", preimage );
+                resolve( preimage );
+            });
+        }
+
+        function getBlockheight() {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var blockheight = Number( xhttp.responseText );
+                        resolve( blockheight );
+                    }
+                };
+                xhttp.open( "GET", "https://mutinynet.com/api/blocks/tip/height", true );
+                xhttp.send();
+            });
+        }
+        function preimageLooper( address, hash ) {
+            return new Promise( async function( resolve, reject ) {
+                var preimage = await getSweepablePreimageFromAllPossibilities( address, hash );
+                if ( !preimage || preimage == "" ) {
+                    setTimeout( async function() {
+                        console.log( "loading preimage for hash", hash + "..." );
+                        var preimage = await preimageLooper( address, hash );
+                        resolve( preimage );
+                    }, 15000 );
+                } else {
+                    resolve( preimage );
+                }
+            });
+        }
+        async function howManyConfs( txid ) {
+            var blockheight = await getBlockheight();
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        if ( json[ "status" ][ "confirmed" ] ) {
+                            resolve( ( Number( blockheight ) - Number( json[ "status" ][ "block_height" ] ) ) + 1 );
+                        } else {
+                            resolve( "0".toString() );
+                        }
+                    } else {
+                        if ( this.status > 399 ) {
+                            resolve( "ejected from mempool" );
+                        }
+                    }
+                };
+                xhttp.open( "GET", "https://mutinynet.com/api/tx/" + txid, true );
+                xhttp.send();
+            });
+        }
+        async function getIdOfTxThatSentMoneyToAddress( address ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        json.reverse();
+                        var counter = 0;
+                        json.forEach( function( tx ) {
+                            tx[ "vout" ].forEach( function( vout ) {
+                                if ( counter == 0 ) {
+                                    if ( "scriptpubkey_address" in vout && vout[ "scriptpubkey_address" ] == address ) {
+                                        resolve( tx[ "txid" ] );
+                                        counter = counter + 1;
+                                    }
+                                }
+                            });
+                        });
+                        resolve( "none" );
+                    }
+                };
+                xhttp.open( "GET", "https://mutinynet.com/api/address/" + address + "/txs", true );
+                xhttp.send();
+            });
+        }
+        //this function returns true if the address received money or false if it did not
+        function addressOnceHadMoney( address ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        if ( json[ "chain_stats" ][ "funded_txo_count" ] > 0 || json[ "mempool_stats" ][ "funded_txo_count" ] > 0 ) {
+                            resolve( true );
+                        }
+                        resolve( false );
+                    }
+                };
+                xhttp.open( "GET", "https://mutinynet.com/api/address/" + address, true );
+                xhttp.send();
+            });
+        }
+        //this function waits until money arrives in an address, checking every five seconds, and then returns true -- it never returns false but it can hang forever
+        async function waitForMoneyToArriveInAddress( address ) {
+            async function isAddressFundedYet( address ) {
+                var address_received_money = await addressOnceHadMoney( address );
+                return new Promise( function( resolve, reject ) {
+                    if ( !address_received_money ) {
+                        setTimeout( async function() {
+                            var msg = await isAddressFundedYet( address );
+                            resolve( msg );
+                        }, 5000 );
+                    } else {
+                        resolve( address_received_money );
+                    }
+                });
+            }
+            async function getTimeoutData() {
+                var address_received_money = await isAddressFundedYet( address );
+                return address_received_money;
+            }
+            var returnable = await getTimeoutData();
+            return returnable;
+        }
+        function pushBTCpmt( rawtx, type, message ) {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function() {
+                if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                    var response = this.responseText;
+                    console.log( "Your transaction was broadcasted, your txid is: " + response );
+                    if ( type == "abort" ) {
+                        alert( message );
+                        setTimeout( function() {window.location.reload();}, 1000 );
+                    }
+                    if ( type == "justice" ) {
+                        alert( "You won! A sore loser delayed your victory but justice was served. Keep your browser open for another 8 blocks to get a small reimbursement as a result of their sore-losering. And get rid of this alert message because it might eventually mess up the scripts that your browser needs to run." );
+                        sessionStorage[ "user_was_warned_about_waiting_another_eight_blocks" ] = true;
+                        document.getElementById( "progressBar" ).style.width = "95%";
+                        document.getElementById( "current_status" ).innerText = "waiting 8 more blocks to get you your reimbursement";
+                    }
+                    if ( type == "reimbursement" ) {
+                        alert( "You got a small reimbursement! Some of the money the sore loser put up as collateral was rewarded to you because they tried to delay the resolution of this lottery." );
+                        document.getElementById( "progressBar" ).style.width = "100%";
+                        document.getElementById( "current_status" ).innerText = "game is done";
+                    }
+                } else {
+                    if ( type == "psft" && this.status > 399 ) {
+                        pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );
+                        alert( "The funding transaction could not be broadcasted, probably because one of your counterparties aborted. Your funds were withdrawn for your safety, you should see them in your wallet soon." );
+                        setTimeout( function() {window.location.reload();}, 1000 );
+                        return;
+                    }
+                }
+            };
+            xhttp.open( "POST", "https://mutinynet.com/api/tx", true );
+            xhttp.send( rawtx );
+        }
+        //this function returns true if the address sent money or false if it did not
+        function addressOnceSentMoney( address ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        if ( json[ "chain_stats" ][ "spent_txo_count" ] > 0 || json[ "mempool_stats" ][ "spent_txo_count" ] > 0 ) {
+                            resolve( true );
+                        }
+                        resolve( false );
+                    }
+                };
+                xhttp.open( "GET", "https://mutinynet.com/api/address/" + address, true );
+                xhttp.send();
+            });
+        }
+        //this function waits until money leaves an address, checking every five seconds, and then returns true -- it never returns false but it can hang forever
+        async function waitForMoneyToLeaveAddress( address ) {
+            async function hasAddressSentOutYet( address ) {
+                var address_sent_money = await addressOnceSentMoney( address );
+                return new Promise( function( resolve, reject ) {
+                    if ( !address_sent_money ) {
+                        setTimeout( async function() {
+                            console.log( "still waiting for money to leave this address:", address )
+                            var msg = await hasAddressSentOutYet( address );
+                            resolve( msg );
+                        }, 5000 );
+                    } else {
+                        resolve( address_sent_money );
+                    }
+                });
+            }
+            async function getTimeoutData() {
+                var address_sent_money = await hasAddressSentOutYet( address );
+                return address_sent_money;
+            }
+            var returnable = await getTimeoutData();
+            return returnable;
+        }
+        function getPreimageFromTransactionThatSpendsAnHTLC( txid, pmthash ) {
+            return new Promise( function( resolve, reject ) {
+                var xhttp = new XMLHttpRequest();
+                xhttp.onreadystatechange = function() {
+                    if ( this.readyState == 4 && ( this.status > 199 && this.status < 300 ) ) {
+                        var json = JSON.parse( xhttp.responseText );
+                        var i; for ( i=0; i<json[ "vin" ].length; i++ ) {
+                            var j; for ( j=0; j<json[ "vin" ][ i ][ "witness" ].length; j++ ) {
+                                if ( bitcoinjs.crypto.hash160( buffer.Buffer.from( json[ "vin" ][ i ][ "witness" ][ j ], "hex" ) ).toString( "hex" ) == pmthash ) {
+                                    resolve( json[ "vin" ][ i ][ "witness" ][ j ] );
+                                }
+                            }
+                        }
+                        resolve( "" );
+                    }
+                };
+                xhttp.open("GET", "https://mutinynet.com/api/tx/" + txid, true);
+                xhttp.send();
+            });
+        }
+        //this function waits until a txid has a certain number of confirmations and then returns true -- it never returns false but it can hang forever
+        async function waitForConfs( txid, blocks_to_wait ) {
+            var numOfConfs = await howManyConfs( txid );
+            return new Promise( function( resolve, reject ) {
+                if ( numOfConfs < blocks_to_wait ) {
+                    setTimeout( async function() {
+                        if ( sessionStorage[ "user_was_warned_about_waiting_eight_blocks" ] && !sessionStorage[ "user_was_warned_about_waiting_another_eight_blocks" ] && document.getElementById( "current_status" ).innerText != "game is done" ) {
+                            var statusmsg = `awaiting ${String( blocks_to_wait - numOfConfs )} more confirmations of this transaction: <a href="https://mutinynet.com/tx/${txid}" target="_blank">${txid}</a> -- or for your opponents to stop delaying. Whatever comes first.`
+                            console.log( statusmsg );
+                            document.getElementById( "current_status" ).innerHTML = statusmsg;
+                        }
+                        if ( sessionStorage[ "user_was_warned_about_waiting_another_eight_blocks" ] && document.getElementById( "current_status" ).innerText != "game is done" ) {
+                            var statusmsg = `awaiting ${String( blocks_to_wait - numOfConfs )} more confirmations of this transaction: <a href="https://mutinynet.com/tx/${txid}" target="_blank">${txid}</a> to get you a small reimbursement for the delay caused by the delayer`
+                            console.log( statusmsg );
+                            document.getElementById( "current_status" ).innerHTML = statusmsg;
+                        }
+                        var msg = await waitForConfs( txid, blocks_to_wait );
+                        resolve( msg );
+                    }, 5000 );
+                } else {
+                    resolve( true );
+                }
+            });
+        }
+    </script>
+    <script>
+        //this function waits until a roster of players is full, checking every five seconds, and then returns true -- it never returns false but it can hang forever
+        async function waitForFullRoster() {
+            async function isRosterFullYet() {
+                var roster_is_full = await rosterIsFull();
+                return new Promise( function( resolve, reject ) {
+                    if ( !roster_is_full ) {
+                        setTimeout( async function() {
+                            var msg = await isRosterFullYet();
+                            resolve( msg );
+                        }, 5000 );
+                    } else {
+                        resolve( roster_is_full );
+                    }
+                });
+            }
+            async function getTimeoutData() {
+                var roster_is_full = await isRosterFullYet();
+                return roster_is_full;
+            }
+            var returnable = await getTimeoutData();
+            return returnable;
+        }
+    </script>
+    <script>
+        //this function waits until a roster of players is full, checking every five seconds, and then returns true -- it never returns false but it can hang forever
+        async function waitForFullRosterOfPreimages( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner ) {
+            async function isRosterOfPreimagesFullYet( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner ) {
+                var roster_of_preimages_is_full = await rosterOfPreimagesIsFull( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+                return new Promise( function( resolve, reject ) {
+                    if ( !roster_of_preimages_is_full ) {
+                        setTimeout( async function() {
+                            var msg = await isRosterOfPreimagesFullYet( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+                            resolve( msg );
+                        }, 5000 );
+                    } else {
+                        document.getElementById( "progressBar" ).style.width = "85%";
+                        document.getElementById( "current_status" ).innerText = "checking if you won";
+                        var ordered_preimages = [];
+                        var proper_order = [];
+                        var unordered_preimages = JSON.parse( sessionStorage[ "roster_of_preimages" ] );
+                        ordered_hashes.forEach( function( hash, index ) {
+                            console.log( "hash I'm working on:", hash );
+                            unordered_preimages.forEach( function( preimage, index2 ) {
+                                console.log( "preimage I'm checking to see if it hashes to that hash:", preimage );
+                                if ( bitcoinjs.crypto.hash160( buffer.Buffer.from( preimage, "hex" ) ).toString( "hex" ) == hash ) {
+                                    console.log( "it does! here is its index:", index2 );
+                                    proper_order.push( index2 );
+                                }
+                            });
+                        });
+                        proper_order.forEach( function( item ) {
+                            ordered_preimages.push( unordered_preimages[ item ] );
+                        });
+                        console.log( "proper order:", proper_order );
+                        determineWinner( ordered_preimages, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+                        resolve( roster_of_preimages_is_full );
+                    }
+                });
+            }
+            async function getTimeoutData( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner ) {
+                var roster_of_preimages_is_full = await isRosterOfPreimagesFullYet( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+                return roster_of_preimages_is_full;
+            }
+            var returnable = await getTimeoutData( mypreimage, ordered_hashes, mynum, info_for_withdrawing_from_lottery_address_as_winner );
+            return returnable;
+        }
+    </script>
+    <script>
+        function determineWinner( preimages, mynum, info_for_withdrawing_from_lottery_address_as_winner ) {
+            info_for_withdrawing_from_lottery_address_as_winner = JSON.parse( atob( info_for_withdrawing_from_lottery_address_as_winner ) );
+            var funding_txid = info_for_withdrawing_from_lottery_address_as_winner[ "funding_txid" ];
+            var num_of_players = Number( info_for_withdrawing_from_lottery_address_as_winner[ "num_of_players" ] );
+            var bet_amount = Number( info_for_withdrawing_from_lottery_address_as_winner[ "bet_amount" ] );
+            var winnings_address = info_for_withdrawing_from_lottery_address_as_winner[ "winnings_address" ];
+            var array_of_hashes_and_pubkeys = info_for_withdrawing_from_lottery_address_as_winner[ "array_of_hashes_and_pubkeys" ];
+            var privkey = info_for_withdrawing_from_lottery_address_as_winner[ "privkey" ];
+            console.log( "my num:", mynum );
+            console.log( "my preimage:", preimages[ mynum ] );
+            console.log( "all preimages:", JSON.stringify( preimages ) );
+            var nums = [];
+            preimages.forEach( function( preimage ) {
+                nums.push( ( preimage.length / 2 ) - 16 );
+            });
+            console.log( "nums:", JSON.stringify( nums ) );
+            var sum = 0;
+            nums.forEach( function( num ) {
+                sum = sum + num;
+            });
+            var modulus = sum % preimages.length;
+            console.log( "modulus:", modulus );
+            document.getElementById( "progressBar" ).style.width = "100%";
+            document.getElementById( "current_status" ).innerText = "game is done";
+            if ( modulus == mynum ) {
+                var winning_tx = withdrawFromLotteryAddress( funding_txid, num_of_players, bet_amount, winnings_address, array_of_hashes_and_pubkeys, privkey, preimages );
+                console.log( "here is the winning transaction:", winning_tx );
+                pushBTCpmt( winning_tx );
+                if ( sessionStorage[ "user_was_warned_about_waiting_eight_blocks" ] || sessionStorage[ "user_was_warned_about_waiting_another_eight_blocks" ] ) {
+                    alert( "The delayer stopped delaying and you won! Check your bitcoin wallet, your winnings should arrive shortly. Oh and you don't need to worry about waiting for any transactions to confirm a bunch of times anymore, the delayer stopped delaying so all is good now." );
+                } else {
+                    alert( "you won! Check your bitcoin wallet, your winnings should arrive shortly." );
+                }
+            } else {
+                if ( sessionStorage[ "user_was_warned_about_waiting_eight_blocks" ] || sessionStorage[ "user_was_warned_about_waiting_another_eight_blocks" ] ) {
+                    alert( "The delayer stopped delaying and, as it turns out, you lost. Sorry! Consider tryinga again. BTW you don't need to worry about waiting for any transactions to confirm a bunch of times anymore, the delayer stopped delaying so all is good now." );
+                } else {
+                    alert( "you lost! Consider trying again." );
+                }
+            }
+        }
+    </script>
+    <script>
+        function rosterIsFull() {
+            if ( !sessionStorage[ "num_of_players" ] ) {
+                return false;
+            }
+            if ( !sessionStorage[ "info_about_the_players" ] || sessionStorage[ "info_about_the_players" ] == "" ) {
+                var info_about_the_players = [];
+                sessionStorage[ "info_about_the_players" ] = JSON.stringify( info_about_the_players );
+            } else {
+                var info_about_the_players = JSON.parse( sessionStorage[ "info_about_the_players" ] );
+            }
+            if ( info_about_the_players.length == Number( sessionStorage[ "num_of_players" ] - 1 ) ) {
+                return true;
+            }
+        }
+    </script>
+    <script>
+        function rosterOfPreimagesIsFull( mypreimage ) {
+            if ( !sessionStorage[ "num_of_players" ] ) {
+                return false;
+            }
+            if ( !sessionStorage[ "roster_of_preimages" ] || sessionStorage[ "roster_of_preimages" ] == "" ) {
+                var roster_of_preimages = [];
+                roster_of_preimages.push( mypreimage );
+                sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
+            } else {
+                var roster_of_preimages = JSON.parse( sessionStorage[ "roster_of_preimages" ] );
+            }
+            if ( roster_of_preimages.length == Number( sessionStorage[ "num_of_players" ] ) ) {
+                return true;
+            }
+        }
+    </script>
+    <script>
+        function takeNextSteps( message, player_pubkey ) {
+            var message = JSON.parse( message );
+            if ( message[ "msg_type" ] == "chat" ) {
+                console.log( "message from " + player_pubkey + ": " + message[ "content" ] );
+                /*
+                usage:
+                var message = {}
+                message[ "msg_type" ] = "chat";
+                message[ "content" ] = "test123";
+                message = JSON.stringify( message );
+                var recipient = <pubkey>;
+                sendDM( message, recipient );
+                */
+            }
+            if ( message[ "msg_type" ] == "session data" ) {
+                var it_was_a_duplicate = false;
+                sessionStorage[ "num_of_players" ] = message[ "session" ][ "num_of_players" ];
+                //this section adds player info to a roster in session storage -- when the roster and my deposit address are full I can click prepareLotteryAddress
+                if ( !sessionStorage[ "info_about_the_players" ] || sessionStorage[ "info_about_the_players" ] == "" ) {
+                    var info_about_the_players = [];
+                    info_about_the_players.push( message[ "session" ] );
+                    sessionStorage[ "info_about_the_players" ] = JSON.stringify( info_about_the_players );
+                } else {
+                    var info_about_the_players = JSON.parse( sessionStorage[ "info_about_the_players" ] );
+                    var known_pubkeys = [];
+                    info_about_the_players.forEach( function( player ) {
+                        known_pubkeys.push( player[ "pubkey" ] );
+                    });
+                    if ( !known_pubkeys.includes( message[ "session" ][ "pubkey" ] ) ) {
+                        info_about_the_players.push( message[ "session" ] );
+                        sessionStorage[ "info_about_the_players" ] = JSON.stringify( info_about_the_players );
+                    } else {
+                        it_was_a_duplicate = true
+                    }
+                }
+                //check if the roster is full; if it isn't, wait for more info; if it is, check if the qr code is displayed; if it is, wait for more info; if it is not, display it
+                if ( !it_was_a_duplicate ) {
+                    console.log( `${player_pubkey} joined your game!` );
+                }
+                var i_should_add_a_pubkey_to_the_list = true;
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    if ( document.getElementsByClassName( "player_pubkey" )[ i ].value == player_pubkey ) {
+                        i_should_add_a_pubkey_to_the_list = false;
+                    }
+                }
+                if ( i_should_add_a_pubkey_to_the_list ) {
+                    var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                        if ( !document.getElementsByClassName( "player_pubkey" )[ i ].value || document.getElementsByClassName( "player_pubkey" )[ i ].value == "" ) {
+                            document.getElementsByClassName( "player_pubkey" )[ i ].value = player_pubkey;
+                        }
+                    }
+                }
+                var one_of_the_pubkeys_in_the_list_is_the_one_i_added = false;
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    if ( document.getElementsByClassName( "player_pubkey" )[ i ].value == player_pubkey ) {
+                        one_of_the_pubkeys_in_the_list_is_the_one_i_added = true;
+                    }
+                }
+                if ( !one_of_the_pubkeys_in_the_list_is_the_one_i_added ) {
+                    makeAnotherPlayer();
+                }
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    if ( !document.getElementsByClassName( "player_pubkey" )[ i ].value || document.getElementsByClassName( "player_pubkey" )[ i ].value == "" ) {
+                        document.getElementsByClassName( "player_pubkey" )[ i ].value = player_pubkey;
+                    }
+                }
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    if ( document.getElementsByClassName( "player_pubkey" )[ i ].value == player_pubkey ) {
+                        document.getElementsByClassName( "player_pubkey" )[ i ].setAttribute( "data-in_game_pubkey", message[ "session" ][ "pubkey" ] );
+                    }
+                }
+                if ( rosterIsFull() && document.getElementById( "submitter" ) ) {
+                    document.getElementById( "submitter" ).click();
+                }
+            }
+            if ( message[ "msg_type" ] == "mid pswts" && !sessionStorage[ "pswts" ] ) {
+                sessionStorage[ "pswts" ] = message[ "mid_pswts" ];
+            }
+            if ( message[ "msg_type" ] == "finalized pswts" && !sessionStorage[ "fully_signed_pswts" ] ) {
+                sessionStorage[ "fully_signed_pswts" ] = message[ "finalized_pswts" ];
+            }
+            if ( message[ "msg_type" ] == "mid pslt" && !sessionStorage[ "pslt" ] ) {
+                sessionStorage[ "pslt" ] = message[ "mid_pslt" ];
+            }
+            if ( message[ "msg_type" ] == "finalized pslt" && !sessionStorage[ "fully_signed_pslt" ] ) {
+                sessionStorage[ "fully_signed_pslt" ] = message[ "finalized_pslt" ];
+            }
+            if ( message[ "msg_type" ] == "mid psft" && !sessionStorage[ "psbt" ] ) {
+                sessionStorage[ "psbt" ] = message[ "mid_psft" ];
+            }
+            if ( message[ "msg_type" ] == "finalized psft" && !sessionStorage[ "fully_signed_psbt" ] ) {
+                sessionStorage[ "fully_signed_psbt" ] = message[ "finalized_psft" ];
+            }
+        }
+    </script>
+    <script>
+        async function handleMessage( message ) {
+            var [ type, subId, event ] = JSON.parse( message.data );
+            var { kind, content } = event || {}
+            if (!event) return
+            var sig_is_valid = await nobleSecp256k1.schnorr.verify( event.sig, event.id, event.pubkey );
+            if (!sig_is_valid) return
+            if (kind === 20004) {
+                content = decrypt(nostr_privKey, event.pubkey, content)
+                takeNextSteps( content, event.pubkey );
+            }
+        }
+    </script>
+    <script>
+        async function openConnection( e ) {
+            console.log( "connected to " + relay );
+            var subscription = [ "REQ", subId, filter ];
+            socket.send( JSON.stringify( subscription ) );
+/*
+            var event = {
+                "content"    : "this workshop is awesome!",
+                "created_at" : Math.floor( Date.now() / 1000 ),
+                "kind"       : 1,
+                "tags"       : [],
+                "pubkey"     : nostr_pubKey,
+            }
+            var signedEvent = await getSignedEvent(event, nostr_privKey)
+            console.log('signedEvent:', signedEvent)
+            socket.send(JSON.stringify([ "EVENT", signedEvent ]))
+*/
+        }
+    </script>
+    <script>
+        function checkHeartbeat() {
+            heartbeat = false;
+            var heartbeatsubId   = "00000002" + bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 8 )
+            var heartbeatfilter  = { "ids": [ "41ce9bc50da77dda5542f020370ecc2b056d8f2be93c1cedf1bf57efcab095b0" ] }
+            var heartbeatsub     = [ "REQ", heartbeatsubId, heartbeatfilter ];
+            if ( socket && socket.readyState != 0 ) {
+                socket.send( JSON.stringify( heartbeatsub ) );
+            }
+            setTimeout( function() {
+                var closer = [ "CLOSE", heartbeatsubId ];
+                if ( socket && socket.readyState != 0 ) {
+                    socket.send( JSON.stringify( closer ) );
+                }
+            }, 1500 );
+            setTimeout( function() {
+                if ( !heartbeat && socket.readyState == 3 ) {
+                    socket.removeEventListener( 'open', openConnection );
+                    socket.removeEventListener( 'message', handleMessage );
+                    socket = new WebSocket( relay );
+                    socket.addEventListener( 'open', openConnection );
+                    socket.addEventListener( 'message', handleMessage );
+                }
+            }, 2000 );
+        }
+    </script>
+    <script>
+        var { getSharedSecret, schnorr, utils } = nobleSecp256k1
+        var crypto  = window.crypto 
+        var getRand = size => crypto.getRandomValues(new Uint8Array(size))
+        var sha256  = bitcoinjs.crypto.sha256
+        var nostr_keypair = bitcoinjs.ECPair.makeRandom()
+        var nostr_privKey = nostr_keypair.privateKey.toString( "hex" )
+        var nostr_pubKey  = nostr_keypair.publicKey.toString( "hex" )
+        nostr_pubKey      = nostr_pubKey.substring( 2 )
+        console.log( "nostr_pubKey:", nostr_pubKey );
+        var relay = "wss://relay.damus.io";
+        var socket = new WebSocket( relay );
+        socket.addEventListener('message', handleMessage );
+        var subId   = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" )
+        var filter  = { "#p": [ nostr_pubKey ] }
+        socket.addEventListener('open', openConnection );
+
+        async function sendDM( message, recipient ) {
+            var encrypted_message = encrypt( nostr_privKey, recipient, message )
+            var encrypted_event = {
+                "content"    : encrypted_message,
+                "created_at" : Math.floor( Date.now() / 1000 ),
+                "kind"       : 20004,
+                "tags"       : [ [ 'p', recipient ] ],
+                "pubkey"     : nostr_pubKey,
+            }
+            var signedEncryptedEvent = await getSignedEvent( encrypted_event, nostr_privKey );
+            socket.send( JSON.stringify( [ "EVENT", signedEncryptedEvent ] ) );
+        }
+
+        async function getSignedEvent(event, privateKey) {
+            var eventData = JSON.stringify([
+                0,                    // Reserved for future use
+                event['pubkey'],        // The sender's public key
+                event['created_at'],    // Unix timestamp
+                event['kind'],        // Message “kind” or type
+                event['tags'],        // Tags identify replies/recipients
+                event['content']        // Your note contents
+            ])
+            event.id  = sha256( eventData ).toString( 'hex' )
+            event.sig = await schnorr.sign( event.id, privateKey ) 
+            return event
+        }
+        function hexToBytes( hex ) {
+            return Uint8Array.from( hex.match( /.{1,2}/g ).map( ( byte ) => parseInt( byte, 16 ) ) );
+        }
+
+        function bytesToHex( bytes ) {
+            return bytes.reduce( ( str, byte ) => str + byte.toString( 16 ).padStart( 2, '0' ), '' );
+        }
+        function base64ToHex( str ) {
+            var raw = atob( str );
+            var result = '';
+            var i; for ( i=0; i<raw.length; i++ ) {
+                var hex = raw.charCodeAt( i ).toString( 16 );
+                result += ( hex.length === 2 ? hex : '0' + hex );
+            }
+            return result;
+        }
+        function encrypt( privkey, pubkey, text ) {
+            var key = nobleSecp256k1.getSharedSecret( privkey, '02' + pubkey, true ).substring( 2 );
+            var iv = window.crypto.getRandomValues(new Uint8Array(16));
+            var cipher = browserifyCipher.createCipheriv( 'aes-256-cbc', hexToBytes( key ), iv );
+            var encryptedMessage = cipher.update(text,"utf8","base64");
+            emsg = encryptedMessage + cipher.final( "base64" );
+            var uint8View = new Uint8Array( iv.buffer );
+            var decoder = new TextDecoder();
+            return emsg + "?iv=" + btoa( String.fromCharCode.apply( null, uint8View ) );
+        }
+        function decrypt( privkey, pubkey, ciphertext ) {
+            var [ emsg, iv ] = ciphertext.split( "?iv=" );
+            var key = nobleSecp256k1.getSharedSecret( privkey, '02' + pubkey, true ).substring( 2 );
+            var decipher = browserifyCipher.createDecipheriv(
+                'aes-256-cbc',
+                hexToBytes( key ),
+                hexToBytes( base64ToHex( iv ) )
+            );
+            var decryptedMessage = decipher.update( emsg, "base64" );
+            dmsg = decryptedMessage + decipher.final( "utf8" );
+            return dmsg;
+        }
+    </script>
+    <script>
+        function makeAnotherPlayer( element ) {
+            if ( element && document.getElementsByClassName( "player_pubkey" ).length < 4 ) {
+                element.previousElementSibling.style.display = "inline-block";
+            }
+            if ( document.getElementsByClassName( "player_pubkey" ).length < 4 ) {
+                if ( document.getElementById( "plus_button" ) ) {
+                    document.getElementById( "plus_button" ).remove();
+                }
+                var input = document.createElement( "input" );
+                input.type = "text";
+                input.className = "player_pubkey";
+                input.name = "player_pubkey";
+                input.style.marginRight = ".9em";
+                input.style.marginBottom = "1em";
+                document.getElementById( "player_pubkeys" ).append( input );
+                var minus = document.createElement( "div" );
+                minus.className = "minus_button";
+                minus.innerText = "-";
+                minus.onclick = function() {this.previousElementSibling.remove();this.remove();}
+                document.getElementById( "player_pubkeys" ).append( minus );
+                var plus = document.createElement( "div" );
+                plus.id = "plus_button";
+                plus.innerText = "+";
+                plus.onclick = function() {makeAnotherPlayer( this );}
+                document.getElementById( "player_pubkeys" ).append( plus );
+            } else {
+                alert( "max number of players is 5 (the pubkeys here plus yours)" );
+            }
+        }
+    </script>
+</head>
+<body>
+    <h1>Bitcoin lottery</h1>
+    <p>Your public key</p>
+    <input type="text" id="nostr_pubkey" name="nostr_pubkey" disabled />
+    <p>Bet amount (in sats)</p>
+    <input type="number" id="bet_amount" name="bet_amount" min="540" value="540" step="1" />
+    <p>Address where your winnings, if any, should go</p>
+    <input type="text" id="winnings_address" name="winnings_address" />
+    <p>Enter the pubkeys of the other players</p>
+    <div id="player_pubkeys"></div>
+    <p>
+        <button id="submitter" type="button">Submit</button>
+    </p>
+    <h2>Progress bar</h2>
+    <div id="progressOutline" style="height: 2em; border: 1px solid grey; border-radius: 25px; overflow: hidden;"><div id="progressBar" style="height: 2em; background-color: #61eb34; width: 0%; transition: width 1s;"></div></div>
+    <p style="margin-bottom: 3px; overflow-wrap: break-word;">Current status:</p>
+    <div id="current_status" name="current_status" style="border: 1px solid grey; padding: 3px; overflow-wrap: break-word;">waiting for you and one or more other players to start the game</div>
+    <p>
+        <button id="abort_button" type="button" style="display: none;" onclick='if( confirm( "Are you sure you want to abort this game? Your funds will be withdrawn for your safety and you should see them in your wallet soon." ) ) {pushBTCpmt( sessionStorage[ "abortLotteryTx" ] );setTimeout( function() {window.location.reload();}, 3000 );}'>Abort</button>
+    </p>
+    <script>
+        document.getElementById( "current_status" ).innerText = "waiting for you and one or more other players to start the game";
+        makeAnotherPlayer();
+        document.getElementById( "nostr_pubkey" ).value = nostr_pubKey;
+        document.getElementById( "submitter" ).addEventListener( "click", async function() {
+            var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                if ( ( !document.getElementsByClassName( "player_pubkey" )[ i ].value || document.getElementsByClassName( "player_pubkey" )[ i ].value == "" ) && !rosterIsFull() ) {
+                    console.log( "the roster is not full!" );
+                    alert( "No blank pubkeys" );
+                    return;
+                }
+            }
+            var bet_amount = Number( document.getElementById( "bet_amount" ).value );
+            var num_of_players = Number( document.getElementsByClassName( "player_pubkey" ).length ) + 1;
+            if ( !sessionStorage[ "num_of_players" ] && num_of_players && num_of_players != "" ) {
+                sessionStorage[ "num_of_players" ] = num_of_players;
+            }
+            if ( sessionStorage[ "num_of_players" ] && num_of_players && num_of_players != "" && Number( sessionStorage[ "num_of_players" ] ) != num_of_players ) {
+                alert( "One of your counterparties says the number of players is different from what you say it is. Aborting. Consider trying again." );
+                setTimeout( function() {window.location.reload();}, 1000 );
+                return;
+            }
+            var winnings_address = document.getElementById( "winnings_address" ).value;
+            if ( !winnings_address || winnings_address == "" ) {
+                winnings_address = prompt( "Looks like you forgot to put in a bitcoin address where your winnings should go if you win. Please paste one here." );
+            }
+            document.getElementById( "player_pubkeys" ).style.display = "none";
+            document.getElementById( "player_pubkeys" ).previousElementSibling.style.display = "none";
+            document.getElementById( "submitter" ).remove();
+            document.getElementById( "progressBar" ).style.width = "5%";
+            document.getElementById( "current_status" ).innerText = "waiting for your deposit";
+            var deposit_minimum = ( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + bet_amount + 500;
+            var keypair = bitcoinjs.ECPair.makeRandom();
+            var privkey = keypair.privateKey.toString( "hex" );
+            console.log( "privkey:", privkey );
+            var pubkey = keypair.publicKey.toString( "hex" );
+            var deposit_address = getNativeSegwitAddressFromPrivkeyHex( privkey );
+            var alert_text = `Please deposit exactly ${deposit_minimum} sats into the bitcoin address displayed below. The breakdown for this deposit amount is: ${bet_amount} sats will fund the lottery address; 500 sats are reserved for transaction fees; ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } sats serve as collateral, you'll get that part back later (it will go into your winnings address regardless of whether you actually win or not), plus more if you win the lottery. ${bet_amount} + ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) } + 500 = ${( ( bet_amount * num_of_players ) * ( num_of_players - 1 ) ) + 500 + bet_amount } sats`;
+            var amount_prep = String( deposit_minimum ).padStart( 9, '0');
+            var fp = amount_prep.substring( 0, amount_prep.length - 8 );
+            var sp = amount_prep.substring( amount_prep.length - 8 );
+            var amount_in_btc = fp + "." + sp;
+            var qr = document.createElement( "a" );
+            qr.href = "bitcoin:" + deposit_address + "?amount=" + String( amount_in_btc );
+            qr.target = "_blank";
+            qr.append( createQR( deposit_address.toUpperCase() + "?AMOUNT=" + String( amount_in_btc ) ) );
+            document.body.append( qr );
+            var p = document.createElement( "p" );
+            p.innerHTML = "Bitcoin address: " + deposit_address + "<br><br>Precise deposit amount: " + deposit_minimum + " sats";
+            document.body.append( p );
+            alert( alert_text );
+            var moneyArrived = await waitForMoneyToArriveInAddress( deposit_address );
+            if ( moneyArrived ) {
+                document.getElementById( "abort_button" ).style.display = "inline";
+                document.getElementById( "progressBar" ).style.width = "15%";
+                document.getElementById( "current_status" ).innerText = "waiting for your opponents' deposits";
+                var txid = await getIdOfTxThatSentMoneyToAddress( deposit_address );
+                var url = "https://mutinynet.com/api/tx/" + txid;
+                var tx = await getData( url );
+                var tx = JSON.parse( tx );
+                var txindex = 202020202020202020;
+                tx[ "vout" ].forEach( function( vout, index ) {
+                    if ( vout[ "scriptpubkey_address" ] == deposit_address ) {
+                        txindex = index;
+                    }
+                });
+                if ( txindex == 202020202020202020 ) {
+                    alert( "nice try but this transaction did not deposit money into the deposit address!" );
+                    window.location.reload();
+                    return;
+                }
+                sessionStorage[ "abortLotteryTx" ] = abortLottery( txid, txindex, bet_amount, winnings_address, privkey, pubkey, num_of_players );
+                if ( tx[ "vout" ][ txindex ][ "value" ] != deposit_minimum ) {
+                    alert( "nice try but this transaction did not deposit the right amount of money into the deposit address! Withdraw your funds using this transaction: " + sessionStorage[ "abortLotteryTx" ] );
+                    window.location.reload();
+                    return;
+                }
+                var rand = Math.floor( Math.random() * ( num_of_players ) );
+                var sixteen_plus_rand = 16 + rand;
+                var preimage = bitcoinjs.ECPair.makeRandom().privateKey.toString( "hex" ).substring( 0, ( sixteen_plus_rand * 2 ) );
+                var numhash = bitcoinjs.crypto.hash160( buffer.Buffer.from( preimage, "hex" ) ).toString( "hex" );
+                var roster_of_preimages = [];
+                roster_of_preimages.push( preimage );
+                sessionStorage[ "roster_of_preimages" ] = JSON.stringify( roster_of_preimages );
+                var session = {}
+                session[ "amount" ] = bet_amount;
+                session[ "num_of_players" ] = num_of_players;
+                session[ "pubkey" ] = pubkey;
+                session[ "winnings_address" ] = winnings_address;
+                session[ "numhash" ] = numhash;
+                session[ "utxo" ] = {}
+                session[ "utxo" ][ "txid" ] = txid;
+                session[ "utxo" ][ "txindex" ] = txindex;
+                session[ "utxo" ][ "value" ] = tx[ "vout" ][ txindex ][ "value" ];
+                console.log( JSON.stringify( session ) );
+                var sendable = {}
+                sendable[ "msg_type" ] = "session data";
+                sendable[ "session" ] = session;
+                var player_pubkeys = [];
+                var i; for ( i=0; i<document.getElementsByClassName( "player_pubkey" ).length; i++ ) {
+                    player_pubkeys.push( document.getElementsByClassName( "player_pubkey" )[ i ].value );
+                }
+                player_pubkeys.forEach( function( pubkey, index ) {
+                    num_of_seconds = ( index + 1 ) * 1000;
+                    setTimeout( function() {sendDM( JSON.stringify( sendable ), pubkey );}, num_of_seconds );
+                });
+                console.log( "random number:", String( rand ) + ",", "preimage:", preimage, "preimage length:", String( preimage.length / 2 ) );
+                var textarea = document.createElement( "textarea" );
+                textarea.id = "counterparty";
+                textarea.name = "counterparty";
+                textarea.style.display = "none";
+                document.body.append( textarea );
+                var submit_counterparty = document.createElement( "button" );
+                submit_counterparty.type = "button";
+                submit_counterparty.id = "submit_counterparty";
+                submit_counterparty.style.display = "none";
+                submit_counterparty.innerText = "Submit counterparty info";
+                submit_counterparty.setAttribute( "data-session", JSON.stringify( session ) );
+                submit_counterparty.setAttribute( "data-bet_amount", String( bet_amount ) );
+                submit_counterparty.setAttribute( "data-privkey", privkey );
+                submit_counterparty.setAttribute( "data-pubkey", pubkey );
+                submit_counterparty.setAttribute( "data-preimage", preimage );
+                submit_counterparty.setAttribute( "data-winnings_address", winnings_address );
+                submit_counterparty.setAttribute( "data-deposit_minimum", deposit_minimum );
+                document.body.append( submit_counterparty );
+                document.getElementById( "submit_counterparty" ).addEventListener( "click", prepareLotteryAddress );
+                var roster_is_full = await waitForFullRoster();
+                if ( roster_is_full ) {
+                    document.getElementById( "progressBar" ).style.width = "25%";
+                    document.getElementById( "current_status" ).innerText = "everyone deposited their money -- preparing collateral addresses";
+                    document.getElementById( "counterparty" ).value = sessionStorage[ "info_about_the_players" ];
+                    document.getElementById( "submit_counterparty" ).click();
+                }
+            }
+        });
+    </script>
+    <script>
+        async function doBackgroundTasks() {
+            checkHeartbeat();
+            if ( !sessionStorage[ "user_was_warned_about_collateral_withdrawals" ] && sessionStorage[ "time_when_i_started_waiting_for_withdrawal_transactions" ] && Math.floor( Date.now() / 1000 ) - Number( sessionStorage[ "time_when_i_started_waiting_for_withdrawal_transactions" ] ) > 20 && !sessionStorage[ "fully_signed_collateral_withdrawal_transactions" ] ) {
+                var warning_message = "Your opponents did not send you their signatures in a timely manner. This indicates a possible griefing attack. Consider aborting. There is an abort button just above the qr code that will send your funds back to your wallet safely minus a mining fee. If you abort, consider trying again with different counterparties.";
+                sessionStorage[ "user_was_warned_about_collateral_withdrawals" ] = true;
+                alert( warning_message );
+            }
+            if ( !sessionStorage[ "user_was_warned_about_lottery_withdrawals" ] && sessionStorage[ "time_when_i_started_waiting_for_the_lottery_transaction" ] && Math.floor( Date.now() / 1000 ) - Number( sessionStorage[ "time_when_i_started_waiting_for_the_lottery_transaction" ] ) > 20 && !sessionStorage[ "fully_signed_pslt_tx" ] ) {
+                var warning_message = "Your opponents did not send you their signatures in a timely manner. This indicates a possible griefing attack. Consider aborting. There is an abort button just above the qr code that will send your funds back to your wallet safely minus a mining fee. If you abort, consider trying again with different counterparties.";
+                sessionStorage[ "user_was_warned_about_lottery_withdrawals" ] = true;
+                alert( warning_message );
+            }
+            if ( !sessionStorage[ "user_was_warned_about_funding_grief" ] && sessionStorage[ "time_when_i_started_waiting_for_the_funding_transaction" ] && Math.floor( Date.now() / 1000 ) - Number( sessionStorage[ "time_when_i_started_waiting_for_the_funding_transaction" ] ) > 20 && !sessionStorage[ "fully_signed_psft_tx" ] ) {
+                var warning_message = "Your opponents did not send you their signatures in a timely manner. This indicates a possible griefing attack. Consider aborting. There is an abort button just above the qr code that will send your funds back to your wallet safely minus a mining fee. If you abort, consider trying again with different counterparties.";
+                sessionStorage[ "user_was_warned_about_funding_grief" ] = true;
+                alert( warning_message );
+            }
+            if ( sessionStorage[ "wait_state" ] == "skipping" && !sessionStorage[ "skipping_user_was_reminded_an_opponent_might_be_waiting" ] && sessionStorage[ "time_when_i_started_waiting_for_collateral_withdrawals" ] && Math.floor( Date.now() / 1000 ) - Number( sessionStorage[ "time_when_i_started_waiting_for_collateral_withdrawals" ] ) > 30 && document.getElementById( "current_status" ).innerText != "game is done" ) {
+                var warning_message = `Your opponents did not withdraw their collateral in a timely manner. One of them probably decided to wait til the funding transaction confirms before continuing, which is wise, otherwise losers can cheat. But fear not, most transactions get confirmed about every ten minutes. To wait for the funding transaction to confirm, you'll go into "waiting mode" and the progress bar will go back a little.`;
+                sessionStorage[ "skipping_user_was_reminded_an_opponent_might_be_waiting" ] = true;
+                if ( sessionStorage[ "psbt" ] ) {
+                    sessionStorage[ "fully_signed_psbt" ] = sessionStorage[ "psbt" ];
+                }
+                if ( sessionStorage[ "fully_signed_psbt" ] ) {
+                    sessionStorage[ "psbt" ] = sessionStorage[ "fully_signed_psbt" ];
+                }
+                alert( warning_message );
+                sessionStorage[ "wait_state" ] = "waiting";
+                document.getElementById( "progressBar" ).style.width = "70%";
+                document.getElementById( "current_status" ).innerHTML = `awaiting confirmation of this transaction: <a href="https://mutinynet.com/tx/${getIdFromPSBT( sessionStorage[ "psbt" ] )}" target="_blank">${getIdFromPSBT( sessionStorage[ "psbt" ] )}</a>`;
+                console.log( "waiting for the funding tx to get confirmed. Here is its txid:", getIdFromPSBT( sessionStorage[ "psbt" ] ) );
+                var txIsSufficientlyConfirmed = await waitForConfs( getIdFromPSBT( sessionStorage[ "psbt" ] ), 1 );
+                sessionStorage[ "wait_state" ] = "done";
+                sessionStorage[ "time_when_i_started_waiting_for_collateral_withdrawals" ] = Math.floor( Date.now() / 1000 );
+            }
+            if ( !sessionStorage[ "user_was_warned_about_waiting_eight_blocks" ] && sessionStorage[ "wait_state" ] == "done" && sessionStorage[ "time_when_i_started_waiting_for_collateral_withdrawals" ] && Math.floor( Date.now() / 1000 ) - Number( sessionStorage[ "time_when_i_started_waiting_for_collateral_withdrawals" ] ) > 50 && document.getElementById( "current_status" ).innerText != "game is done" ) {
+                var warning_message = `The funding transaction confirmed but one of your opponents appears to be delaying contract resolution. Hang tight, delays only last up to 8 blocks (about 80 minutes) after this transaction confirms: https://mutinynet.com/tx/${getIdFromPSBT( sessionStorage[ "psbt" ] )}. If you abort now you'll lose your chance to win, so stay strong. The rightful winner will win after the delay. Oh yeah and sometimes if the delayer keeps delaying you'll also get a second, smaller reimbursement another 8 blocks after that (so about 160 minutes from now). So keep your browser open for 16 blocks, and get rid of this alert message because it might eventually mess up the scripts that your browser needs to run.`;
+                sessionStorage[ "user_was_warned_about_waiting_eight_blocks" ] = true;
+                document.getElementById( "progressBar" ).style.width = "82%";
+                document.getElementById( "current_status" ).innerHTML = `awaiting 7 more confirmations of this transaction: <a href="https://mutinynet.com/tx/${getIdFromPSBT( sessionStorage[ "psbt" ] )}" target="_blank">${getIdFromPSBT( sessionStorage[ "psbt" ] )}</a> -- or for your opponents to stop delaying. Whatever comes first.`;
+                alert( warning_message );
+            }
+            if ( sessionStorage[ "wait_state" ] && sessionStorage[ "wait_state" ] == "waiting" ) {
+                var fundingTxIsInvalid = await howManyConfs( getIdFromPSBT( sessionStorage[ "psbt" ] ) );
+                if ( fundingTxIsInvalid == "ejected from mempool" ) {
+                    var abort_message = "The funding transaction did not confirm, probably because one of your counterparties aborted. Your funds were withdrawn for your safety, you should see them in your wallet soon.";
+                    pushBTCpmt( sessionStorage[ "abortLotteryTx" ], "abort", abort_message );
+                }
+            }
+            setTimeout( function() {doBackgroundTasks();}, 10000 );
+        }
+        doBackgroundTasks();
+    </script>
+</body>
+</html>
